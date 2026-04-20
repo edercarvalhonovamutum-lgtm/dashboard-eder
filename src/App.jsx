@@ -15,11 +15,12 @@ import {
   ReferenceLine,
 } from "recharts";
 
-const STORAGE_KEY = "dashboard_ec_cloud_v1";
+const STORAGE_KEY = "dashboard_ec_drive_v2";
 
 // LINKS DIRETOS DO GOOGLE DRIVE
 const GENIAL_DRIVE_URL =
   "https://drive.google.com/uc?export=download&id=1_j4vsiUt2YQflhN0DQ_EUHk9NOeQNMGY";
+
 const RICO_DRIVE_URL =
   "https://drive.google.com/uc?export=download&id=1G2YrPwuuz0-u7ZD3RSJFvz0pByjw2aad";
 
@@ -218,6 +219,25 @@ function MiniCard({ title, value, color }) {
   );
 }
 
+function CustomTooltip({ active, payload, label }) {
+  if (!active || !payload || !payload.length) return null;
+
+  return (
+    <div style={styles.tooltip}>
+      <div style={{ marginBottom: 6, fontWeight: "bold" }}>{label}</div>
+      {payload.map((entry, idx) => (
+        <div key={idx} style={{ color: entry.color, fontSize: 13 }}>
+          {entry.name}: {formatMoney(entry.value)}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function formatMoney(value) {
+  return `R$ ${Number(value || 0).toFixed(2)}`;
+}
+
 export default function App() {
   const currentMonthKey = toMonthKey(new Date());
 
@@ -240,6 +260,7 @@ export default function App() {
         genialByMonth: saved.genialByMonth || {},
         ricoByMonth: saved.ricoByMonth || {},
       });
+
       if (typeof saved.metaMensal === "number") setMetaMensal(saved.metaMensal);
       if (typeof saved.custo === "number") setCusto(saved.custo);
       if (saved.selectedMonth) setSelectedMonth(saved.selectedMonth);
@@ -321,6 +342,7 @@ export default function App() {
   const yearNum = Number(yearStr || 0);
   const monthNum = Number(monthStr || 0);
   const now = new Date();
+
   const diasRestantes =
     selectedMonth === currentMonthKey
       ? businessDaysRemaining(yearNum, monthNum, now.getDate())
@@ -332,6 +354,7 @@ export default function App() {
   const percentGenial = totalAnual
     ? ((totalGenialAnual / totalAnual) * 100).toFixed(1)
     : "0.0";
+
   const percentRico = totalAnual
     ? ((totalRicoAnual / totalAnual) * 100).toFixed(1)
     : "0.0";
@@ -342,9 +365,11 @@ export default function App() {
   const melhorDiaGeral = monthData.length
     ? monthData.reduce((max, item) => (item.total > max.total ? item : max), monthData[0])
     : null;
+
   const melhorDiaGenial = monthData.length
     ? monthData.reduce((max, item) => (item.genial > max.genial ? item : max), monthData[0])
     : null;
+
   const melhorDiaRico = monthData.length
     ? monthData.reduce((max, item) => (item.rico > max.rico ? item : max), monthData[0])
     : null;
@@ -352,9 +377,11 @@ export default function App() {
   const piorDiaGeral = monthData.length
     ? monthData.reduce((min, item) => (item.total < min.total ? item : min), monthData[0])
     : null;
+
   const piorDiaGenial = monthData.length
     ? monthData.reduce((min, item) => (item.genial < min.genial ? item : min), monthData[0])
     : null;
+
   const piorDiaRico = monthData.length
     ? monthData.reduce((min, item) => (item.rico < min.rico ? item : min), monthData[0])
     : null;
@@ -407,7 +434,23 @@ export default function App() {
     });
 
     const detectedMonths = Object.keys(grouped).sort();
-    if (detectedMonths.length) setSelectedMonth(detectedMonths[detectedMonths.length - 1]);
+    if (detectedMonths.length) {
+      setSelectedMonth(detectedMonths[detectedMonths.length - 1]);
+    }
+  }
+
+  async function fetchCsvText(url) {
+    const finalUrl = `${url}&t=${Date.now()}`;
+    const res = await fetch(finalUrl, {
+      method: "GET",
+      cache: "no-store",
+    });
+
+    if (!res.ok) {
+      throw new Error(`Erro HTTP ${res.status}`);
+    }
+
+    return await res.text();
   }
 
   async function importDriveFiles() {
@@ -415,14 +458,15 @@ export default function App() {
       setLoadingDrive(true);
       setStatusMsg("Buscando arquivos do Drive...");
 
-      const genialRes = await fetch(`${GENIAL_DRIVE_URL}&t=${Date.now()}`);
-      const ricoRes = await fetch(`${RICO_DRIVE_URL}&t=${Date.now()}`);
-
-      const genialText = await genialRes.text();
-      const ricoText = await ricoRes.text();
+      const genialText = await fetchCsvText(GENIAL_DRIVE_URL);
+      const ricoText = await fetchCsvText(RICO_DRIVE_URL);
 
       const genialRows = parseProfitCsvText(genialText, "genial", custo);
       const ricoRows = parseProfitCsvText(ricoText, "rico", custo);
+
+      if (!genialRows.length && !ricoRows.length) {
+        throw new Error("Os arquivos foram lidos, mas não retornaram linhas válidas.");
+      }
 
       applyParsedRows(genialRows, "genial");
       applyParsedRows(ricoRows, "rico");
@@ -430,7 +474,7 @@ export default function App() {
       setStatusMsg("Arquivos do Drive atualizados com sucesso.");
     } catch (err) {
       console.error(err);
-      setStatusMsg("Erro ao buscar os CSVs do Google Drive.");
+      setStatusMsg(`Erro ao buscar os CSVs do Google Drive: ${err.message}`);
     } finally {
       setLoadingDrive(false);
     }
@@ -466,25 +510,6 @@ export default function App() {
     setSelectedMonth(currentMonthKey);
     setSelectedDay("TODOS");
     setStatusMsg("Histórico apagado.");
-  }
-
-  function formatMoney(value) {
-    return `R$ ${Number(value).toFixed(2)}`;
-  }
-
-  function CustomTooltip({ active, payload, label }) {
-    if (!active || !payload || !payload.length) return null;
-
-    return (
-      <div style={styles.tooltip}>
-        <div style={{ marginBottom: 6, fontWeight: "bold" }}>{label}</div>
-        {payload.map((entry, idx) => (
-          <div key={idx} style={{ color: entry.color, fontSize: 13 }}>
-            {entry.name}: {formatMoney(entry.value)}
-          </div>
-        ))}
-      </div>
-    );
   }
 
   return (
