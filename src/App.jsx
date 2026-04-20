@@ -15,7 +15,7 @@ import {
   ReferenceLine,
 } from "recharts";
 
-const STORAGE_KEY = "dashboard_ec_public_v1";
+const STORAGE_KEY = "dashboard_ec_professional_history_v1";
 
 const GENIAL_CSV_URL = "/genial.csv";
 const RICO_CSV_URL = "/rico.csv";
@@ -46,41 +46,50 @@ function shortDate(dateTime) {
   return String(dateTime || "").split(" ")[0] || "";
 }
 
-function getDay(dateTime) {
+function getDateParts(dateTime) {
   const d = shortDate(dateTime);
   const parts = d.split("/");
-  return parts.length === 3 ? parts[0] : "";
+  if (parts.length !== 3) {
+    return { day: "", month: 0, year: 0, dateKey: "" };
+  }
+
+  const day = parts[0];
+  const month = Number(parts[1]);
+  const year = Number(parts[2]);
+
+  return {
+    day,
+    month,
+    year,
+    dateKey: `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
+  };
 }
 
-function getMonth(dateTime) {
-  const d = shortDate(dateTime);
-  const parts = d.split("/");
-  return parts.length === 3 ? Number(parts[1]) : 0;
-}
-
-function getYear(dateTime) {
-  const d = shortDate(dateTime);
-  const parts = d.split("/");
-  return parts.length === 3 ? Number(parts[2]) : 0;
-}
-
-function getMonthKeyFromDateTime(dateTime) {
-  const year = getYear(dateTime);
-  const month = String(getMonth(dateTime)).padStart(2, "0");
-  if (!year || month === "00") return null;
-  return `${year}-${month}`;
+function formatMoney(value) {
+  return `R$ ${Number(value || 0).toFixed(2)}`;
 }
 
 function monthLabel(monthKey) {
   if (!monthKey) return "";
-  const [y, m] = monthKey.split("-");
-  return `${m}/${y}`;
+  const [year, month] = monthKey.split("-");
+  return `${month}/${year}`;
+}
+
+function monthNameLabel(monthKey) {
+  if (!monthKey) return "";
+  const [year, month] = monthKey.split("-");
+  const idx = Number(month) - 1;
+  return `${MONTH_NAMES[idx] || month}/${year}`;
 }
 
 function toMonthKey(date = new Date()) {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  return `${y}-${m}`;
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function previousMonthKey(monthKey) {
+  const [year, month] = monthKey.split("-").map(Number);
+  const dt = new Date(year, month - 2, 1);
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}`;
 }
 
 function businessDaysRemaining(year, month, startDay) {
@@ -96,69 +105,6 @@ function businessDaysRemaining(year, month, startDay) {
   return total;
 }
 
-function mergeRows(rows) {
-  const map = new Map();
-
-  rows.forEach((row) => {
-    const key = `${row.date}_${row.value}_${row.broker}`;
-    map.set(key, row);
-  });
-
-  return Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date));
-}
-
-function joinBrokerData(genialRows, ricoRows) {
-  const map = {};
-
-  genialRows.forEach((item) => {
-    if (!map[item.date]) {
-      map[item.date] = {
-        date: item.date,
-        shortDate: item.shortDate,
-        day: item.day,
-        month: item.month,
-        year: item.year,
-        genial: 0,
-        rico: 0,
-      };
-    }
-    map[item.date].genial += item.value;
-  });
-
-  ricoRows.forEach((item) => {
-    if (!map[item.date]) {
-      map[item.date] = {
-        date: item.date,
-        shortDate: item.shortDate,
-        day: item.day,
-        month: item.month,
-        year: item.year,
-        genial: 0,
-        rico: 0,
-      };
-    }
-    map[item.date].rico += item.value;
-  });
-
-  let acumulado = 0;
-  let pico = 0;
-
-  return Object.values(map)
-    .sort((a, b) => a.date.localeCompare(b.date))
-    .map((item) => {
-      const total = item.genial + item.rico;
-      acumulado += total;
-      pico = Math.max(pico, acumulado);
-
-      return {
-        ...item,
-        total,
-        acumulado,
-        drawdown: acumulado - pico,
-      };
-    });
-}
-
 function parseProfitCsvText(text, broker, custo) {
   const rows = text
     .split(/\r?\n/)
@@ -170,35 +116,57 @@ function parseProfitCsvText(text, broker, custo) {
     .map((cols) => {
       const fechamento = String(cols[2] || "").trim();
       const total = parseBR(cols[17]);
-      const monthKey = getMonthKeyFromDateTime(fechamento);
 
-      if (!fechamento || !monthKey) return null;
+      if (!fechamento) return null;
+
+      const parts = getDateParts(fechamento);
+      if (!parts.dateKey) return null;
 
       return {
         broker,
-        date: fechamento,
+        originalDate: fechamento,
         shortDate: shortDate(fechamento),
-        day: getDay(fechamento),
-        month: getMonth(fechamento),
-        year: getYear(fechamento),
-        monthKey,
+        day: parts.day,
+        month: parts.month,
+        year: parts.year,
+        monthKey: `${parts.year}-${String(parts.month).padStart(2, "0")}`,
+        dateKey: parts.dateKey,
         value: total - custo,
       };
     })
     .filter(Boolean);
 }
 
-function groupRowsByMonth(rows) {
-  const grouped = {};
+function aggregateBrokerRowsByDate(rows) {
+  const map = {};
   rows.forEach((row) => {
-    if (!grouped[row.monthKey]) grouped[row.monthKey] = [];
-    grouped[row.monthKey].push(row);
+    if (!map[row.dateKey]) {
+      map[row.dateKey] = {
+        dateKey: row.dateKey,
+        shortDate: row.shortDate,
+        day: row.day,
+        month: row.month,
+        year: row.year,
+        monthKey: row.monthKey,
+        value: 0,
+      };
+    }
+    map[row.dateKey].value += row.value;
   });
-  return grouped;
+  return map;
 }
 
-function formatMoney(value) {
-  return `R$ ${Number(value || 0).toFixed(2)}`;
+function sortByDateKeyAsc(list) {
+  return [...list].sort((a, b) => a.dateKey.localeCompare(b.dateKey));
+}
+
+function normalizeDays(daysMap) {
+  return Object.values(daysMap)
+    .map((item) => ({
+      ...item,
+      total: (item.genial || 0) + (item.rico || 0),
+    }))
+    .sort((a, b) => a.dateKey.localeCompare(b.dateKey));
 }
 
 function Card({ title, value, color }) {
@@ -238,8 +206,7 @@ export default function App() {
   const currentMonthKey = toMonthKey(new Date());
 
   const [db, setDb] = useState({
-    genialByMonth: {},
-    ricoByMonth: {},
+    days: {},
   });
 
   const [selectedMonth, setSelectedMonth] = useState(currentMonthKey);
@@ -253,8 +220,7 @@ export default function App() {
     try {
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
       setDb({
-        genialByMonth: saved.genialByMonth || {},
-        ricoByMonth: saved.ricoByMonth || {},
+        days: saved.days || {},
       });
 
       if (typeof saved.metaMensal === "number") setMetaMensal(saved.metaMensal);
@@ -269,8 +235,7 @@ export default function App() {
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({
-        genialByMonth: db.genialByMonth,
-        ricoByMonth: db.ricoByMonth,
+        days: db.days,
         metaMensal,
         custo,
         selectedMonth,
@@ -278,57 +243,75 @@ export default function App() {
     );
   }, [db, metaMensal, custo, selectedMonth]);
 
+  const allDays = useMemo(() => normalizeDays(db.days), [db.days]);
+
   const monthsAvailable = useMemo(() => {
-    const set = new Set([
-      currentMonthKey,
-      ...Object.keys(db.genialByMonth || {}),
-      ...Object.keys(db.ricoByMonth || {}),
-    ]);
+    const set = new Set([currentMonthKey]);
+    allDays.forEach((item) => set.add(item.monthKey));
     return Array.from(set).sort();
-  }, [db, currentMonthKey]);
+  }, [allDays, currentMonthKey]);
 
-  const genialMonth = db.genialByMonth[selectedMonth] || [];
-  const ricoMonth = db.ricoByMonth[selectedMonth] || [];
-
-  const monthData = useMemo(
-    () => joinBrokerData(genialMonth, ricoMonth),
-    [genialMonth, ricoMonth]
-  );
+  const monthDataBase = useMemo(() => {
+    return allDays.filter((item) => item.monthKey === selectedMonth);
+  }, [allDays, selectedMonth]);
 
   const daysAvailable = useMemo(() => {
-    const set = new Set(monthData.map((item) => item.day).filter(Boolean));
+    const set = new Set(monthDataBase.map((item) => item.day).filter(Boolean));
     return ["TODOS", ...Array.from(set).sort((a, b) => Number(a) - Number(b))];
-  }, [monthData]);
+  }, [monthDataBase]);
 
   useEffect(() => {
     if (!daysAvailable.includes(selectedDay)) setSelectedDay("TODOS");
   }, [daysAvailable, selectedDay]);
 
-  const filteredData = useMemo(() => {
-    if (selectedDay === "TODOS") return monthData;
-    return monthData.filter((item) => item.day === selectedDay);
-  }, [monthData, selectedDay]);
+  const monthData = useMemo(() => {
+    const filtered =
+      selectedDay === "TODOS"
+        ? monthDataBase
+        : monthDataBase.filter((item) => item.day === selectedDay);
+
+    let acumulado = 0;
+    let pico = 0;
+
+    return sortByDateKeyAsc(filtered).map((item) => {
+      acumulado += item.total;
+      pico = Math.max(pico, acumulado);
+
+      return {
+        ...item,
+        acumulado,
+        drawdown: acumulado - pico,
+      };
+    });
+  }, [monthDataBase, selectedDay]);
 
   const selectedYear = Number(selectedMonth.split("-")[0] || 0);
 
-  const annualGenialRows = Object.entries(db.genialByMonth)
-    .filter(([monthKey]) => Number(monthKey.split("-")[0]) === selectedYear)
-    .flatMap(([, rows]) => rows);
+  const annualBase = useMemo(() => {
+    return allDays.filter((item) => item.year === selectedYear);
+  }, [allDays, selectedYear]);
 
-  const annualRicoRows = Object.entries(db.ricoByMonth)
-    .filter(([monthKey]) => Number(monthKey.split("-")[0]) === selectedYear)
-    .flatMap(([, rows]) => rows);
+  const annualData = useMemo(() => {
+    let acumulado = 0;
+    let pico = 0;
 
-  const annualData = useMemo(
-    () => joinBrokerData(annualGenialRows, annualRicoRows),
-    [annualGenialRows, annualRicoRows]
-  );
+    return sortByDateKeyAsc(annualBase).map((item) => {
+      acumulado += item.total;
+      pico = Math.max(pico, acumulado);
 
-  const totalMes = monthData.reduce((sum, item) => sum + item.total, 0);
-  const totalFiltro = filteredData.reduce((sum, item) => sum + item.total, 0);
-  const totalAnual = annualData.reduce((sum, item) => sum + item.total, 0);
-  const totalGenialAnual = annualData.reduce((sum, item) => sum + item.genial, 0);
-  const totalRicoAnual = annualData.reduce((sum, item) => sum + item.rico, 0);
+      return {
+        ...item,
+        acumulado,
+        drawdown: acumulado - pico,
+      };
+    });
+  }, [annualBase]);
+
+  const totalMes = monthDataBase.reduce((sum, item) => sum + item.total, 0);
+  const totalFiltro = monthData.reduce((sum, item) => sum + item.total, 0);
+  const totalAnual = annualBase.reduce((sum, item) => sum + item.total, 0);
+  const totalGenialAnual = annualBase.reduce((sum, item) => sum + (item.genial || 0), 0);
+  const totalRicoAnual = annualBase.reduce((sum, item) => sum + (item.rico || 0), 0);
 
   const metaAnual = metaMensal * 12;
   const faltaMes = metaMensal - totalMes;
@@ -358,28 +341,40 @@ export default function App() {
   const progressoMeta =
     metaMensal > 0 ? Math.max(0, Math.min((totalMes / metaMensal) * 100, 100)) : 0;
 
-  const melhorDiaGeral = monthData.length
-    ? monthData.reduce((max, item) => (item.total > max.total ? item : max), monthData[0])
+  const melhorDiaGeral = monthDataBase.length
+    ? monthDataBase.reduce((max, item) => (item.total > max.total ? item : max), monthDataBase[0])
     : null;
 
-  const melhorDiaGenial = monthData.length
-    ? monthData.reduce((max, item) => (item.genial > max.genial ? item : max), monthData[0])
+  const melhorDiaGenial = monthDataBase.length
+    ? monthDataBase.reduce(
+        (max, item) => ((item.genial || 0) > (max.genial || 0) ? item : max),
+        monthDataBase[0]
+      )
     : null;
 
-  const melhorDiaRico = monthData.length
-    ? monthData.reduce((max, item) => (item.rico > max.rico ? item : max), monthData[0])
+  const melhorDiaRico = monthDataBase.length
+    ? monthDataBase.reduce(
+        (max, item) => ((item.rico || 0) > (max.rico || 0) ? item : max),
+        monthDataBase[0]
+      )
     : null;
 
-  const piorDiaGeral = monthData.length
-    ? monthData.reduce((min, item) => (item.total < min.total ? item : min), monthData[0])
+  const piorDiaGeral = monthDataBase.length
+    ? monthDataBase.reduce((min, item) => (item.total < min.total ? item : min), monthDataBase[0])
     : null;
 
-  const piorDiaGenial = monthData.length
-    ? monthData.reduce((min, item) => (item.genial < min.genial ? item : min), monthData[0])
+  const piorDiaGenial = monthDataBase.length
+    ? monthDataBase.reduce(
+        (min, item) => ((item.genial || 0) < (min.genial || 0) ? item : min),
+        monthDataBase[0]
+      )
     : null;
 
-  const piorDiaRico = monthData.length
-    ? monthData.reduce((min, item) => (item.rico < min.rico ? item : min), monthData[0])
+  const piorDiaRico = monthDataBase.length
+    ? monthDataBase.reduce(
+        (min, item) => ((item.rico || 0) < (min.rico || 0) ? item : min),
+        monthDataBase[0]
+      )
     : null;
 
   const piorDrawdown = annualData.length
@@ -395,41 +390,66 @@ export default function App() {
       total: 0,
     }));
 
-    annualData.forEach((item) => {
+    annualBase.forEach((item) => {
       const idx = item.month - 1;
       if (idx >= 0 && idx < 12) {
-        base[idx].genial += item.genial;
-        base[idx].rico += item.rico;
-        base[idx].total += item.total;
+        base[idx].genial += item.genial || 0;
+        base[idx].rico += item.rico || 0;
+        base[idx].total += item.total || 0;
       }
     });
 
     return base;
-  }, [annualData]);
+  }, [annualBase]);
 
-  function applyParsedRows(rows, broker) {
-    const grouped = groupRowsByMonth(rows);
+  const previousKey = previousMonthKey(selectedMonth);
+  const previousMonthTotal = allDays
+    .filter((item) => item.monthKey === previousKey)
+    .reduce((sum, item) => sum + item.total, 0);
+
+  const variationVsPrevious =
+    previousMonthTotal !== 0
+      ? ((totalMes - previousMonthTotal) / Math.abs(previousMonthTotal)) * 100
+      : 0;
+
+  const historyTable = useMemo(() => {
+    return sortByDateKeyAsc(allDays).reverse().slice(0, 20);
+  }, [allDays]);
+
+  function upsertBrokerRows(rows, broker) {
+    const aggregated = aggregateBrokerRowsByDate(rows);
 
     setDb((prev) => {
-      const next = {
-        genialByMonth: { ...prev.genialByMonth },
-        ricoByMonth: { ...prev.ricoByMonth },
-      };
+      const nextDays = { ...prev.days };
 
-      Object.entries(grouped).forEach(([monthKey, monthRows]) => {
-        if (broker === "genial") {
-          const current = next.genialByMonth[monthKey] || [];
-          next.genialByMonth[monthKey] = mergeRows([...current, ...monthRows]);
-        } else {
-          const current = next.ricoByMonth[monthKey] || [];
-          next.ricoByMonth[monthKey] = mergeRows([...current, ...monthRows]);
-        }
+      Object.values(aggregated).forEach((row) => {
+        const current = nextDays[row.dateKey] || {
+          dateKey: row.dateKey,
+          shortDate: row.shortDate,
+          day: row.day,
+          month: row.month,
+          year: row.year,
+          monthKey: row.monthKey,
+          genial: 0,
+          rico: 0,
+        };
+
+        nextDays[row.dateKey] = {
+          ...current,
+          shortDate: row.shortDate,
+          day: row.day,
+          month: row.month,
+          year: row.year,
+          monthKey: row.monthKey,
+          genial: broker === "genial" ? row.value : current.genial || 0,
+          rico: broker === "rico" ? row.value : current.rico || 0,
+        };
       });
 
-      return next;
+      return { days: nextDays };
     });
 
-    const detectedMonths = Object.keys(grouped).sort();
+    const detectedMonths = [...new Set(rows.map((r) => r.monthKey))].sort();
     if (detectedMonths.length) {
       setSelectedMonth(detectedMonths[detectedMonths.length - 1]);
     }
@@ -464,8 +484,8 @@ export default function App() {
         throw new Error("Os arquivos foram lidos, mas não retornaram linhas válidas.");
       }
 
-      applyParsedRows(genialRows, "genial");
-      applyParsedRows(ricoRows, "rico");
+      upsertBrokerRows(genialRows, "genial");
+      upsertBrokerRows(ricoRows, "rico");
 
       setStatusMsg("Arquivos CSV atualizados com sucesso.");
     } catch (err) {
@@ -483,7 +503,7 @@ export default function App() {
     reader.onload = (e) => {
       const text = String(e.target?.result || "");
       const rows = parseProfitCsvText(text, broker, custo);
-      applyParsedRows(rows, broker);
+      upsertBrokerRows(rows, broker);
       setStatusMsg(`Arquivo ${broker} importado com sucesso.`);
     };
     reader.readAsText(file);
@@ -491,21 +511,23 @@ export default function App() {
 
   function clearSelectedMonth() {
     setDb((prev) => {
-      const genialByMonth = { ...prev.genialByMonth };
-      const ricoByMonth = { ...prev.ricoByMonth };
-      delete genialByMonth[selectedMonth];
-      delete ricoByMonth[selectedMonth];
-      return { genialByMonth, ricoByMonth };
+      const nextDays = { ...prev.days };
+      Object.keys(nextDays).forEach((dateKey) => {
+        if (nextDays[dateKey].monthKey === selectedMonth) {
+          delete nextDays[dateKey];
+        }
+      });
+      return { days: nextDays };
     });
     setStatusMsg(`Mês ${monthLabel(selectedMonth)} limpo.`);
   }
 
   function clearAll() {
     localStorage.removeItem(STORAGE_KEY);
-    setDb({ genialByMonth: {}, ricoByMonth: {} });
+    setDb({ days: {} });
     setSelectedMonth(currentMonthKey);
     setSelectedDay("TODOS");
-    setStatusMsg("Histórico apagado.");
+    setStatusMsg("Histórico completo apagado.");
   }
 
   return (
@@ -622,11 +644,26 @@ export default function App() {
           <Card title="Meta anual" value={formatMoney(metaAnual)} color="#00ff88" />
           <Card title="Falta" value={formatMoney(faltaMes)} color="#ff4d4f" />
           <Card title="Falta meta anual" value={formatMoney(faltaAnual)} color="#ff4d4f" />
-          <Card
-            title="Precisa por dia"
-            value={formatMoney(precisaPorDia)}
-            color="#fbbf24"
+          <Card title="Precisa por dia" value={formatMoney(precisaPorDia)} color="#fbbf24" />
+        </div>
+
+        <div style={styles.cardRowSmall}>
+          <MiniCard
+            title={`Mês atual (${monthNameLabel(selectedMonth)})`}
+            value={formatMoney(totalMes)}
+            color="#00ff88"
           />
+          <MiniCard
+            title={`Mês anterior (${monthNameLabel(previousKey)})`}
+            value={formatMoney(previousMonthTotal)}
+            color="#e5e7eb"
+          />
+          <MiniCard
+            title="Variação vs mês anterior"
+            value={`${variationVsPrevious.toFixed(1)}%`}
+            color={variationVsPrevious >= 0 ? "#22c55e" : "#ef4444"}
+          />
+          <MiniCard title="Dias restantes" value={String(diasRestantes)} color="#e5e7eb" />
         </div>
 
         <div style={styles.progressBox}>
@@ -667,7 +704,7 @@ export default function App() {
             }
             color="#fbbf24"
           />
-          <MiniCard title="Dias restantes" value={String(diasRestantes)} color="#e5e7eb" />
+          <MiniCard title="Drawdown" value={formatMoney(piorDrawdown)} color="#ef4444" />
         </div>
 
         <div style={styles.cardRowSmall}>
@@ -698,7 +735,7 @@ export default function App() {
             }
             color="#ef4444"
           />
-          <MiniCard title="Drawdown" value={formatMoney(piorDrawdown)} color="#ef4444" />
+          <MiniCard title="Dias no histórico" value={String(allDays.length)} color="#e5e7eb" />
         </div>
 
         {faltaMes <= 0 && <div style={styles.metaBatida}>💰 META BATIDA</div>}
@@ -722,10 +759,10 @@ export default function App() {
         </div>
 
         <div style={styles.chartFull}>
-          <h3 style={styles.chartTitle}>Gráfico Consolidado</h3>
+          <h3 style={styles.chartTitle}>Gráfico Consolidado do Mês</h3>
           <div style={styles.chartAreaLarge}>
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={filteredData}>
+              <LineChart data={monthData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#22304a" />
                 <XAxis dataKey="shortDate" stroke="#9ca3af" tick={{ fontSize: 11 }} />
                 <YAxis stroke="#9ca3af" tick={{ fontSize: 11 }} />
@@ -784,7 +821,7 @@ export default function App() {
             <h3 style={styles.chartTitle}>Genial</h3>
             <div style={styles.chartAreaSmall}>
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={filteredData}>
+                <LineChart data={monthData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#22304a" />
                   <XAxis dataKey="shortDate" stroke="#9ca3af" tick={{ fontSize: 11 }} />
                   <YAxis stroke="#9ca3af" tick={{ fontSize: 11 }} />
@@ -807,7 +844,7 @@ export default function App() {
             <h3 style={styles.chartTitle}>Rico</h3>
             <div style={styles.chartAreaSmall}>
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={filteredData}>
+                <LineChart data={monthData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#22304a" />
                   <XAxis dataKey="shortDate" stroke="#9ca3af" tick={{ fontSize: 11 }} />
                   <YAxis stroke="#9ca3af" tick={{ fontSize: 11 }} />
@@ -824,6 +861,33 @@ export default function App() {
                 </LineChart>
               </ResponsiveContainer>
             </div>
+          </div>
+        </div>
+
+        <div style={styles.chartFull}>
+          <h3 style={styles.chartTitle}>Histórico Diário (últimos 20 dias salvos)</h3>
+          <div style={styles.historyTable}>
+            <div style={styles.historyHeader}>
+              <span>Data</span>
+              <span>Genial</span>
+              <span>Rico</span>
+              <span>Total</span>
+            </div>
+
+            {historyTable.map((item) => (
+              <div key={item.dateKey} style={styles.historyRow}>
+                <span>{item.shortDate}</span>
+                <span style={{ color: "#60a5fa" }}>{formatMoney(item.genial)}</span>
+                <span style={{ color: "#fbbf24" }}>{formatMoney(item.rico)}</span>
+                <span style={{ color: item.total >= 0 ? "#22c55e" : "#ef4444" }}>
+                  {formatMoney(item.total)}
+                </span>
+              </div>
+            ))}
+
+            {!historyTable.length && (
+              <div style={styles.historyEmpty}>Nenhum histórico salvo ainda.</div>
+            )}
           </div>
         </div>
       </div>
@@ -1029,5 +1093,36 @@ const styles = {
     padding: 10,
     borderRadius: 8,
     color: "#fff",
+  },
+  historyTable: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+  },
+  historyHeader: {
+    display: "grid",
+    gridTemplateColumns: "1.2fr 1fr 1fr 1fr",
+    gap: 10,
+    padding: "10px 12px",
+    background: "#111b31",
+    borderRadius: 10,
+    color: "#cbd5e1",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  historyRow: {
+    display: "grid",
+    gridTemplateColumns: "1.2fr 1fr 1fr 1fr",
+    gap: 10,
+    padding: "10px 12px",
+    background: "#0b1324",
+    borderRadius: 10,
+    border: "1px solid #172033",
+    fontSize: 13,
+  },
+  historyEmpty: {
+    textAlign: "center",
+    color: "#94a3b8",
+    padding: 12,
   },
 };
