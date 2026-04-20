@@ -15,14 +15,10 @@ import {
   ReferenceLine,
 } from "recharts";
 
-const STORAGE_KEY = "dashboard_ec_drive_v2";
+const STORAGE_KEY = "dashboard_ec_public_v1";
 
-// LINKS DIRETOS DO GOOGLE DRIVE
-const GENIAL_DRIVE_URL =
-  "https://drive.google.com/uc?export=download&id=1_j4vsiUt2YQflhN0DQ_EUHk9NOeQNMGY";
-
-const RICO_DRIVE_URL =
-  "https://drive.google.com/uc?export=download&id=1G2YrPwuuz0-u7ZD3RSJFvz0pByjw2aad";
+const GENIAL_CSV_URL = "/genial.csv";
+const RICO_CSV_URL = "/rico.csv";
 
 const MONTH_NAMES = [
   "Jan",
@@ -201,6 +197,10 @@ function groupRowsByMonth(rows) {
   return grouped;
 }
 
+function formatMoney(value) {
+  return `R$ ${Number(value || 0).toFixed(2)}`;
+}
+
 function Card({ title, value, color }) {
   return (
     <div style={styles.card}>
@@ -234,10 +234,6 @@ function CustomTooltip({ active, payload, label }) {
   );
 }
 
-function formatMoney(value) {
-  return `R$ ${Number(value || 0).toFixed(2)}`;
-}
-
 export default function App() {
   const currentMonthKey = toMonthKey(new Date());
 
@@ -250,7 +246,7 @@ export default function App() {
   const [selectedDay, setSelectedDay] = useState("TODOS");
   const [metaMensal, setMetaMensal] = useState(10000);
   const [custo, setCusto] = useState(2.8);
-  const [loadingDrive, setLoadingDrive] = useState(false);
+  const [loadingCsv, setLoadingCsv] = useState(false);
   const [statusMsg, setStatusMsg] = useState("");
 
   useEffect(() => {
@@ -440,7 +436,7 @@ export default function App() {
   }
 
   async function fetchCsvText(url) {
-    const finalUrl = `${url}&t=${Date.now()}`;
+    const finalUrl = `${url}?t=${Date.now()}`;
     const res = await fetch(finalUrl, {
       method: "GET",
       cache: "no-store",
@@ -453,13 +449,13 @@ export default function App() {
     return await res.text();
   }
 
-  async function importDriveFiles() {
+  async function atualizarDoPublic() {
     try {
-      setLoadingDrive(true);
-      setStatusMsg("Buscando arquivos do Drive...");
+      setLoadingCsv(true);
+      setStatusMsg("Buscando arquivos CSV do site...");
 
-      const genialText = await fetchCsvText(GENIAL_DRIVE_URL);
-      const ricoText = await fetchCsvText(RICO_DRIVE_URL);
+      const genialText = await fetchCsvText(GENIAL_CSV_URL);
+      const ricoText = await fetchCsvText(RICO_CSV_URL);
 
       const genialRows = parseProfitCsvText(genialText, "genial", custo);
       const ricoRows = parseProfitCsvText(ricoText, "rico", custo);
@@ -471,12 +467,12 @@ export default function App() {
       applyParsedRows(genialRows, "genial");
       applyParsedRows(ricoRows, "rico");
 
-      setStatusMsg("Arquivos do Drive atualizados com sucesso.");
+      setStatusMsg("Arquivos CSV atualizados com sucesso.");
     } catch (err) {
       console.error(err);
-      setStatusMsg(`Erro ao buscar os CSVs do Google Drive: ${err.message}`);
+      setStatusMsg(`Erro ao buscar os CSVs do site: ${err.message}`);
     } finally {
-      setLoadingDrive(false);
+      setLoadingCsv(false);
     }
   }
 
@@ -589,10 +585,10 @@ export default function App() {
 
           <button
             style={styles.driveButton}
-            onClick={importDriveFiles}
-            disabled={loadingDrive}
+            onClick={atualizarDoPublic}
+            disabled={loadingCsv}
           >
-            {loadingDrive ? "Atualizando..." : "Atualizar do Drive"}
+            {loadingCsv ? "Atualizando..." : "Atualizar CSV"}
           </button>
 
           <button style={styles.clearButton} onClick={clearSelectedMonth}>
