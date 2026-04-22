@@ -136,11 +136,7 @@ function getBusinessDaysRemaining(monthKey) {
   const fim = new Date(ano, mes, 0);
 
   let total = 0;
-  for (
-    let d = new Date(inicio);
-    d <= fim;
-    d.setDate(d.getDate() + 1)
-  ) {
+  for (let d = new Date(inicio); d <= fim; d.setDate(d.getDate() + 1)) {
     const day = d.getDay();
     if (day !== 0 && day !== 6) total++;
   }
@@ -163,7 +159,15 @@ function Card({ titulo, valor, cor = "#00ff88", subtitulo = "" }) {
       <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 8 }}>
         {titulo}
       </div>
-      <div style={{ fontSize: 28, color: cor, fontWeight: "800", lineHeight: 1.1 }}>
+      <div
+        style={{
+          fontSize: 28,
+          color: cor,
+          fontWeight: "800",
+          lineHeight: 1.1,
+          whiteSpace: "pre-line",
+        }}
+      >
         {valor}
       </div>
       {!!subtitulo && (
@@ -550,7 +554,9 @@ export default function App() {
 
   const diasUteisRestantes = getBusinessDaysRemaining(mesSelecionado);
   const valorPorDia =
-    faltaMensal > 0 && diasUteisRestantes > 0 ? faltaMensal / diasUteisRestantes : 0;
+    faltaMensal > 0 && diasUteisRestantes > 0
+      ? faltaMensal / diasUteisRestantes
+      : 0;
 
   return (
     <div
@@ -762,11 +768,7 @@ export default function App() {
             gap: "14px",
           }}
         >
-          <Card
-            titulo="MÊS ANTERIOR"
-            valor={formatMoney(totalMesAnterior)}
-            cor="#cbd5e1"
-          />
+          <Card titulo="MÊS ANTERIOR" valor={formatMoney(totalMesAnterior)} cor="#cbd5e1" />
           <Card
             titulo="VARIAÇÃO VS MÊS ANT."
             valor={`${variacaoMesAnterior.toFixed(1)}%`}
@@ -803,7 +805,7 @@ export default function App() {
             cor="#ff4d4f"
           />
           <Card titulo="DIAS NO MÊS" valor={String(diasOrdenadosMes.length)} cor="#e5e7eb" />
-          <Card titulo="PROGRESSO MÊS" value="" valor={`${progressoMensal.toFixed(1)}%`} cor="#00ffd5" />
+          <Card titulo="PROGRESSO MÊS" valor={`${progressoMensal.toFixed(1)}%`} cor="#00ffd5" />
         </div>
 
         <div style={{ marginTop: 24 }}>
