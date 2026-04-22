@@ -1,179 +1,107 @@
 import { useEffect, useState } from "react";
+import { db } from "./firebase";
+import {
+  collection,
+  doc,
+  setDoc,
+  onSnapshot
+} from "firebase/firestore";
 
 export default function App() {
   const [dados, setDados] = useState([]);
   const [metaMensal, setMetaMensal] = useState(10000);
-  const [custo, setCusto] = useState(2.8);
-  const [mesSelecionado, setMesSelecionado] = useState("");
-  const [diaSelecionado, setDiaSelecionado] = useState("Todos");
 
-  // 🔥 CARREGA CSV AUTOMÁTICO
+  // 🔥 CARREGA EM TEMPO REAL
   useEffect(() => {
-    async function carregar() {
-      try {
-        const resGenial = await fetch("/genial.csv");
-        const resRico = await fetch("/rico.csv");
+    const unsub = onSnapshot(collection(db, "resultados"), (snap) => {
+      const lista = [];
+      snap.forEach((doc) => lista.push(doc.data()));
+      setDados(lista);
+    });
 
-        const txtGenial = await resGenial.text();
-        const txtRico = await resRico.text();
-
-        const parseCSV = (txt, corretora) => {
-          const linhas = txt.split("\n").slice(1);
-          return linhas.map(l => {
-            const col = l.split(";");
-            return {
-              data: col[0],
-              resultado: parseFloat(col[5]?.replace(",", ".")) || 0,
-              corretora
-            };
-          });
-        };
-
-        const dadosFinal = [
-          ...parseCSV(txtGenial, "Genial"),
-          ...parseCSV(txtRico, "Rico")
-        ];
-
-        setDados(dadosFinal);
-      } catch (e) {
-        console.log("Erro ao carregar CSV");
-      }
-    }
-
-    carregar();
+    return () => unsub();
   }, []);
 
-  // 🔥 FILTRO
-  const dadosFiltrados = dados.filter(d => {
-    if (!d.data) return false;
+  // 🔥 IMPORTAR CSV
+  async function importarCSV(file, corretora) {
+    const text = await file.text();
+    const linhas = text.split("\n").slice(1);
 
-    const mes = d.data.split("/")[1] + "/" + d.data.split("/")[2];
-    const dia = d.data.split("/")[0];
+    for (let l of linhas) {
+      const col = l.split(";");
+      const data = col[0];
 
-    if (mesSelecionado && mes !== mesSelecionado) return false;
-    if (diaSelecionado !== "Todos" && dia !== diaSelecionado) return false;
+      if (!data) continue;
 
-    return true;
-  });
+      const valor = parseFloat(col[5]?.replace(",", ".")) || 0;
 
-  const total = dadosFiltrados.reduce((a, b) => a + b.resultado, 0);
+      const [dia, mes, ano] = data.split("/");
 
-  const genial = dadosFiltrados
-    .filter(d => d.corretora === "Genial")
-    .reduce((a, b) => a + b.resultado, 0);
+      const dateKey = `${ano}-${mes}-${dia}`;
 
-  const rico = dadosFiltrados
-    .filter(d => d.corretora === "Rico")
-    .reduce((a, b) => a + b.resultado, 0);
+      const ref = doc(db, "resultados", dateKey);
 
-  const progressoMeta = (total / metaMensal) * 100;
-  const falta = metaMensal - total;
+      await setDoc(ref, {
+        dateKey,
+        shortDate: data,
+        monthKey: `${ano}-${mes}`,
+        genial: corretora === "Genial" ? valor : 0,
+        rico: corretora === "Rico" ? valor : 0,
+        updatedAt: Date.now()
+      }, { merge: true });
+    }
 
-  // 🔥 STATUS EM INGLÊS
-  const ritmoTexto =
-    progressoMeta >= 100
+    alert("Salvo no Firebase 🚀");
+  }
+
+  const total = dados.reduce((a, b) => a + (b.genial || 0) + (b.rico || 0), 0);
+
+  const progresso = (total / metaMensal) * 100;
+
+  const status =
+    progresso >= 100
       ? "TARGET ACHIEVED"
-      : progressoMeta >= 70
+      : progresso >= 70
       ? "ON TRACK"
-      : "BEHIND SCHEDULE";
-
-  const corStatus =
-    progressoMeta >= 100
-      ? "#00ff88"
-      : progressoMeta >= 70
-      ? "#FFD700"
-      : "#ff4d4d";
+      : "BEHIND";
 
   return (
-    <div style={{ padding: 20, background: "#020617", minHeight: "100vh", color: "white" }}>
+    <div style={{ background: "#020617", minHeight: "100vh", color: "white", padding: 20 }}>
       
       <h1 style={{ textAlign: "center", color: "#00ffcc" }}>
         DASHBOARD EC
       </h1>
 
-      {/* FILTROS */}
-      <div style={{ display: "flex", gap: 10, justifyContent: "center", marginBottom: 20 }}>
+      {/* IMPORTAR CSV */}
+      <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+        
         <input
-          placeholder="MM/YYYY"
-          onChange={e => setMesSelecionado(e.target.value)}
+          type="file"
+          onChange={(e) => importarCSV(e.target.files[0], "Genial")}
         />
 
         <input
-          placeholder="Dia"
-          onChange={e => setDiaSelecionado(e.target.value)}
-        />
-
-        <input
-          value={metaMensal}
-          onChange={e => setMetaMensal(Number(e.target.value))}
-        />
-
-        <input
-          value={custo}
-          onChange={e => setCusto(Number(e.target.value))}
+          type="file"
+          onChange={(e) => importarCSV(e.target.files[0], "Rico")}
         />
       </div>
 
       {/* STATUS */}
-      <div
-        style={{
-          border: `2px solid ${corStatus}`,
-          padding: 10,
-          textAlign: "center",
-          borderRadius: 10,
-          marginBottom: 20,
-          color: corStatus
-        }}
-      >
-        {ritmoTexto}
+      <div style={{
+        border: "2px solid gold",
+        marginTop: 20,
+        padding: 10,
+        textAlign: "center",
+        borderRadius: 10
+      }}>
+        {status}
       </div>
 
-      {/* CARDS */}
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
-        
-        <Card titulo="TOTAL P&L" valor={total} />
-        <Card titulo="MONTH TARGET" valor={metaMensal} />
-        <Card titulo="REMAINING" valor={falta} />
-        <Card titulo="GENIAL" valor={genial} />
-        <Card titulo="RICO" valor={rico} />
+      {/* TOTAL */}
+      <h2 style={{ textAlign: "center", marginTop: 20 }}>
+        TOTAL: R$ {total.toFixed(2)}
+      </h2>
 
-      </div>
-
-      {/* PROGRESSO */}
-      <div style={{ marginTop: 30 }}>
-        <div>Progress</div>
-        <div style={{ background: "#111", height: 10, borderRadius: 10 }}>
-          <div
-            style={{
-              width: `${Math.min(progressoMeta, 100)}%`,
-              background: "#00ff88",
-              height: "100%",
-              borderRadius: 10
-            }}
-          />
-        </div>
-        <div>{progressoMeta.toFixed(1)}%</div>
-      </div>
-    </div>
-  );
-}
-
-// 🔥 COMPONENTE CARD
-function Card({ titulo, valor }) {
-  return (
-    <div
-      style={{
-        background: "#0f172a",
-        padding: 15,
-        borderRadius: 10,
-        minWidth: 150,
-        textAlign: "center"
-      }}
-    >
-      <div style={{ fontSize: 12, color: "#94a3b8" }}>{titulo}</div>
-      <div style={{ fontSize: 20, color: "#00ff88" }}>
-        R$ {valor.toFixed(2)}
-      </div>
     </div>
   );
 }
