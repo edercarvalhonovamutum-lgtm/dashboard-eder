@@ -151,6 +151,21 @@ function getStatus(progressoMensal) {
   return { text: "BEHIND", color: "#ff4d4f" };
 }
 
+function getWeekdayName(dateKey) {
+  const [ano, mes, dia] = dateKey.split("-").map(Number);
+  const date = new Date(ano, mes - 1, dia);
+  const names = [
+    "Domingo",
+    "Segunda",
+    "Terça",
+    "Quarta",
+    "Quinta",
+    "Sexta",
+    "Sábado",
+  ];
+  return names[date.getDay()];
+}
+
 function StatCard({ title, value, sub, color = "#00ff88" }) {
   return (
     <div
@@ -250,7 +265,7 @@ function RankingCard({ title, items, color }) {
           >
             <div style={{ color: "#dbe4ee", fontSize: 13 }}>{item.shortDate}</div>
             <div style={{ color, fontWeight: 800, fontSize: 13 }}>
-              {formatMoney(item.totalLiquido)}
+              {formatMoney(item.totalLiquidoFiltrado)}
             </div>
           </div>
         ))
@@ -363,6 +378,7 @@ export default function App() {
   const [mensagem, setMensagem] = useState("");
   const [mesSelecionado, setMesSelecionado] = useState("");
   const [diaSelecionado, setDiaSelecionado] = useState("");
+  const [filtroCorretora, setFiltroCorretora] = useState("consolidado");
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "trades"), (snap) => {
@@ -463,31 +479,52 @@ export default function App() {
       const genialLiquido = genialBruto - opsGenial * Number(custoOperacao || 0);
       const ricoLiquido = ricoBruto - opsRico * Number(custoOperacao || 0);
 
+      let totalLiquidoFiltrado = genialLiquido + ricoLiquido;
+      let opsFiltradas = opsGenial + opsRico;
+      let custoFiltrado = (opsGenial + opsRico) * Number(custoOperacao || 0);
+
+      if (filtroCorretora === "genial") {
+        totalLiquidoFiltrado = genialLiquido;
+        opsFiltradas = opsGenial;
+        custoFiltrado = opsGenial * Number(custoOperacao || 0);
+      }
+
+      if (filtroCorretora === "rico") {
+        totalLiquidoFiltrado = ricoLiquido;
+        opsFiltradas = opsRico;
+        custoFiltrado = opsRico * Number(custoOperacao || 0);
+      }
+
       return {
         ...item,
         genialLiquido,
         ricoLiquido,
-        totalLiquido: genialLiquido + ricoLiquido,
+        totalLiquidoConsolidado: genialLiquido + ricoLiquido,
+        totalLiquidoFiltrado,
         operacoesTotal: opsGenial + opsRico,
+        opsFiltradas,
         custoTotal: (opsGenial + opsRico) * Number(custoOperacao || 0),
+        custoFiltrado,
       };
     });
-  }, [dados, custoOperacao]);
+  }, [dados, custoOperacao, filtroCorretora]);
 
   const dadosMesCalculados = useMemo(() => {
     if (!mesSelecionado) return dadosCalculados;
     return dadosCalculados.filter((item) => item.monthKey === mesSelecionado);
   }, [dadosCalculados, mesSelecionado]);
 
-  const totalGeral = dadosCalculados.reduce((acc, item) => acc + Number(item.totalLiquido || 0), 0);
-  const totalMes = dadosMesCalculados.reduce((acc, item) => acc + Number(item.totalLiquido || 0), 0);
+  const totalGeral = dadosCalculados.reduce((acc, item) => acc + Number(item.totalLiquidoFiltrado || 0), 0);
+  const totalMes = dadosMesCalculados.reduce((acc, item) => acc + Number(item.totalLiquidoFiltrado || 0), 0);
+
   const totalGenialMes = dadosMesCalculados.reduce((acc, item) => acc + Number(item.genialLiquido || 0), 0);
   const totalRicoMes = dadosMesCalculados.reduce((acc, item) => acc + Number(item.ricoLiquido || 0), 0);
 
-  const totalOpsMes = dadosMesCalculados.reduce((acc, item) => acc + Number(item.operacoesTotal || 0), 0);
+  const totalOpsMes = dadosMesCalculados.reduce((acc, item) => acc + Number(item.opsFiltradas || 0), 0);
   const opsGenialMes = dadosMesCalculados.reduce((acc, item) => acc + Number(item.opsGenial || 0), 0);
   const opsRicoMes = dadosMesCalculados.reduce((acc, item) => acc + Number(item.opsRico || 0), 0);
-  const custoTotalMes = dadosMesCalculados.reduce((acc, item) => acc + Number(item.custoTotal || 0), 0);
+
+  const custoTotalMes = dadosMesCalculados.reduce((acc, item) => acc + Number(item.custoFiltrado || 0), 0);
 
   const progressoMensal = metaMensal > 0 ? (totalMes / metaMensal) * 100 : 0;
   const progressoAnual = metaAnual > 0 ? (totalGeral / metaAnual) * 100 : 0;
@@ -503,14 +540,14 @@ export default function App() {
   const melhorDia =
     diasOrdenadosMes.length > 0
       ? diasOrdenadosMes.reduce((max, item) =>
-          Number(item.totalLiquido || 0) > Number(max.totalLiquido || 0) ? item : max
+          Number(item.totalLiquidoFiltrado || 0) > Number(max.totalLiquidoFiltrado || 0) ? item : max
         )
       : null;
 
   const piorDia =
     diasOrdenadosMes.length > 0
       ? diasOrdenadosMes.reduce((min, item) =>
-          Number(item.totalLiquido || 0) < Number(min.totalLiquido || 0) ? item : min
+          Number(item.totalLiquidoFiltrado || 0) < Number(min.totalLiquidoFiltrado || 0) ? item : min
         )
       : null;
 
@@ -526,29 +563,29 @@ export default function App() {
 
   for (let i = 0; i < diasOrdenadosMes.length; i++) {
     const item = diasOrdenadosMes[i];
-    acumulado += Number(item.totalLiquido || 0);
+    acumulado += Number(item.totalLiquidoFiltrado || 0);
     if (acumulado > pico) pico = acumulado;
     const ddAtual = pico - acumulado;
     if (ddAtual > drawdownMax) drawdownMax = ddAtual;
 
     curvaCapital.push(acumulado);
     curvaDrawdown.push(ddAtual);
-    curvaDiasOperacao.push(Number(item.totalLiquido || 0));
+    curvaDiasOperacao.push(Number(item.totalLiquidoFiltrado || 0));
     labelsDias.push(item.shortDate);
   }
 
   const topDias = [...diasOrdenadosMes]
-    .sort((a, b) => Number(b.totalLiquido || 0) - Number(a.totalLiquido || 0))
+    .sort((a, b) => Number(b.totalLiquidoFiltrado || 0) - Number(a.totalLiquidoFiltrado || 0))
     .slice(0, 5);
 
   const pioresDias = [...diasOrdenadosMes]
-    .sort((a, b) => Number(a.totalLiquido || 0) - Number(b.totalLiquido || 0))
+    .sort((a, b) => Number(a.totalLiquidoFiltrado || 0) - Number(b.totalLiquidoFiltrado || 0))
     .slice(0, 5);
 
   const mesAnteriorKey = getPreviousMonthKey(mesSelecionado);
   const totalMesAnterior = dadosCalculados
     .filter((item) => item.monthKey === mesAnteriorKey)
-    .reduce((acc, item) => acc + Number(item.totalLiquido || 0), 0);
+    .reduce((acc, item) => acc + Number(item.totalLiquidoFiltrado || 0), 0);
 
   const variacaoMesAnterior =
     totalMesAnterior !== 0
@@ -561,6 +598,25 @@ export default function App() {
 
   const datasDisponiveis = diasOrdenadosMes.map((item) => item.dateKey);
   const diaFiltrado = diasOrdenadosMes.find((item) => item.dateKey === diaSelecionado);
+
+  const resultadoDiaSemana = useMemo(() => {
+    const mapa = {
+      Segunda: 0,
+      Terça: 0,
+      Quarta: 0,
+      Quinta: 0,
+      Sexta: 0,
+    };
+
+    diasOrdenadosMes.forEach((item) => {
+      const nome = getWeekdayName(item.dateKey);
+      if (mapa[nome] !== undefined) {
+        mapa[nome] += Number(item.totalLiquidoFiltrado || 0);
+      }
+    });
+
+    return mapa;
+  }, [diasOrdenadosMes]);
 
   return (
     <div
@@ -576,7 +632,7 @@ export default function App() {
         <h1
           style={{
             color: "#00ffd5",
-            fontSize: "60px",
+            fontSize: "44px",
             marginBottom: "18px",
             fontWeight: "800",
             letterSpacing: "1px",
@@ -636,6 +692,16 @@ export default function App() {
             ))}
           </select>
 
+          <select
+            value={filtroCorretora}
+            onChange={(e) => setFiltroCorretora(e.target.value)}
+            style={{ padding: "8px", borderRadius: "8px", border: "none", width: "140px" }}
+          >
+            <option value="consolidado">Consolidado</option>
+            <option value="genial">Só Genial</option>
+            <option value="rico">Só Rico</option>
+          </select>
+
           <button
             onClick={handleUpload}
             disabled={loading}
@@ -653,6 +719,24 @@ export default function App() {
             {loading ? "Enviando..." : "Atualizar CSV"}
           </button>
         </div>
+
+        {progressoMensal >= 100 ? (
+          <div
+            style={{
+              marginBottom: 14,
+              padding: 14,
+              borderRadius: 14,
+              background: "linear-gradient(90deg, #00ff8840, #00ffd540)",
+              color: "#00ff88",
+              fontWeight: 900,
+              letterSpacing: 1,
+              border: "1px solid #00ff8860",
+              boxShadow: "0 0 20px rgba(0,255,136,0.18)",
+            }}
+          >
+            ✅ META BATIDA
+          </div>
+        ) : null}
 
         <div
           style={{
@@ -743,7 +827,7 @@ export default function App() {
             <select
               value={diaSelecionado}
               onChange={(e) => setDiaSelecionado(e.target.value)}
-              style={{ padding: "8px", borderRadius: "8px", border: "none", width: "160px" }}
+              style={{ padding: "8px", borderRadius: "8px", border: "none", width: "170px" }}
             >
               <option value="">Selecione o dia</option>
               {datasDisponiveis.map((data) => (
@@ -766,10 +850,10 @@ export default function App() {
               <StatCard title="DATA" value={diaFiltrado.shortDate} color="#e5e7eb" />
               <StatCard title="GENIAL DIA" value={formatMoney(diaFiltrado.genialLiquido)} color="#60a5fa" />
               <StatCard title="RICO DIA" value={formatMoney(diaFiltrado.ricoLiquido)} color="#fbbf24" />
-              <StatCard title="TOTAL DIA" value={formatMoney(diaFiltrado.totalLiquido)} color="#00ff88" />
+              <StatCard title="TOTAL DIA" value={formatMoney(diaFiltrado.totalLiquidoFiltrado)} color="#00ff88" />
               <StatCard title="OPS GENIAL DIA" value={String(diaFiltrado.opsGenial || 0)} color="#60a5fa" />
               <StatCard title="OPS RICO DIA" value={String(diaFiltrado.opsRico || 0)} color="#fbbf24" />
-              <StatCard title="CUSTO DIA" value={formatMoney(diaFiltrado.custoTotal)} color="#ff4d4f" />
+              <StatCard title="CUSTO DIA" value={formatMoney(diaFiltrado.custoFiltrado)} color="#ff4d4f" />
             </div>
           ) : null}
         </div>
@@ -827,6 +911,36 @@ export default function App() {
         >
           <RankingCard title="Top 5 Melhores Dias" items={topDias} color="#00ff88" />
           <RankingCard title="Top 5 Piores Dias" items={pioresDias} color="#ff4d4f" />
+        </div>
+
+        <div
+          style={{
+            marginTop: 22,
+            background: "linear-gradient(180deg, rgba(15,23,42,0.95) 0%, rgba(6,13,26,0.95) 100%)",
+            border: "1px solid rgba(255,255,255,0.06)",
+            borderRadius: 18,
+            padding: 16,
+            boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
+          }}
+        >
+          <div style={{ fontWeight: 700, marginBottom: 12 }}>Resultado por Dia da Semana</div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+              gap: 12,
+            }}
+          >
+            {Object.entries(resultadoDiaSemana).map(([dia, valor]) => (
+              <StatCard
+                key={dia}
+                title={dia}
+                value={formatMoney(valor)}
+                color={valor >= 0 ? "#00ff88" : "#ff4d4f"}
+              />
+            ))}
+          </div>
         </div>
       </div>
     </div>
