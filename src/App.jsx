@@ -4,9 +4,91 @@ import {
   collection,
   doc,
   setDoc,
+  getDoc,
   onSnapshot,
-  getDocs,
 } from "firebase/firestore";
+
+function parseBR(value) {
+  if (value === null || value === undefined || value === "") return 0;
+  return (
+    parseFloat(String(value).replace(/\./g, "").replace(",", ".").trim()) || 0
+  );
+}
+
+function splitLine(line) {
+  if (line.includes(";")) return line.split(";");
+  return line.split(",");
+}
+
+function normalizeDate(dateText) {
+  const txt = String(dateText || "").trim();
+  const onlyDate = txt.split(" ")[0];
+  const parts = onlyDate.split("/");
+
+  if (parts.length !== 3) return null;
+
+  const dia = String(parts[0]).padStart(2, "0");
+  const mes = String(parts[1]).padStart(2, "0");
+  const ano = String(parts[2]);
+
+  return {
+    shortDate: `${dia}/${mes}/${ano}`,
+    monthKey: `${ano}-${mes}`,
+    dateKey: `${ano}-${mes}-${dia}`,
+  };
+}
+
+function parseProfitCsv(text) {
+  const linhas = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l !== "");
+
+  const dados = [];
+
+  for (let i = 0; i < linhas.length; i++) {
+    const cols = splitLine(linhas[i]);
+
+    if (!cols || cols.length < 18) continue;
+
+    const dataRaw = String(cols[2] || "").trim();
+    const totalRaw = String(cols[17] || "").trim();
+
+    if (!dataRaw.includes("/")) continue;
+
+    const dateInfo = normalizeDate(dataRaw);
+    if (!dateInfo) continue;
+
+    const valor = parseBR(totalRaw);
+
+    dados.push({
+      dateKey: dateInfo.dateKey,
+      shortDate: dateInfo.shortDate,
+      monthKey: dateInfo.monthKey,
+      valor,
+    });
+  }
+
+  return dados;
+}
+
+function agruparPorDia(lista) {
+  const mapa = {};
+
+  lista.forEach((item) => {
+    if (!mapa[item.dateKey]) {
+      mapa[item.dateKey] = {
+        dateKey: item.dateKey,
+        shortDate: item.shortDate,
+        monthKey: item.monthKey,
+        valor: 0,
+      };
+    }
+    mapa[item.dateKey].valor += item.valor;
+  });
+
+  return Object.values(mapa);
+}
 
 export default function App() {
   const [dados, setDados] = useState([]);
@@ -22,60 +104,29 @@ export default function App() {
       snap.forEach((docSnap) => {
         lista.push(docSnap.data());
       });
+
+      lista.sort((a, b) => String(a.dateKey).localeCompare(String(b.dateKey)));
       setDados(lista);
     });
 
     return () => unsub();
   }, []);
 
-  async function importarCSV(file, corretora) {
+  async function salvarArquivoNoFirebase(file, corretora) {
     if (!file) return;
 
     const text = await file.text();
-    const linhas = text.split(/\r?\n/).filter((linha) => linha.trim() !== "");
+    const bruto = parseProfitCsv(text);
+    const agrupado = agruparPorDia(bruto);
 
-    const dadosImportados = [];
-
-    for (let i = 1; i < linhas.length; i++) {
-      const col = linhas[i].split(";");
-      if (!col || col.length < 6) continue;
-
-      const data = String(col[0] || "").trim();
-      if (!data.includes("/")) continue;
-
-      const valorTexto = String(col[5] || "0").trim();
-      const valor = parseFloat(valorTexto.replace(/\./g, "").replace(",", ".")) || 0;
-
-      const partes = data.split("/");
-      if (partes.length !== 3) continue;
-
-      const dia = partes[0].padStart(2, "0");
-      const mes = partes[1].padStart(2, "0");
-      const ano = partes[2];
-
-      const dateKey = `${ano}-${mes}-${dia}`;
-
-      dadosImportados.push({
-        dateKey,
-        shortDate: `${dia}/${mes}/${ano}`,
-        monthKey: `${ano}-${mes}`,
-        genial: corretora === "Genial" ? valor : 0,
-        rico: corretora === "Rico" ? valor : 0,
-        updatedAt: Date.now(),
-      });
-    }
-
-    for (const item of dadosImportados) {
+    for (const item of agrupado) {
       const ref = doc(db, "trades", item.dateKey);
+      const existente = await getDoc(ref);
 
-      const snap = await getDocs(collection(db, "trades"));
-      let atual = null;
+      const atual = existente.exists() ? existente.data() : {};
 
-      snap.forEach((docSnap) => {
-        if (docSnap.id === item.dateKey) {
-          atual = docSnap.data();
-        }
-      });
+      const genialAtual = Number(atual.genial || 0);
+      const ricoAtual = Number(atual.rico || 0);
 
       await setDoc(
         ref,
@@ -83,14 +134,8 @@ export default function App() {
           dateKey: item.dateKey,
           shortDate: item.shortDate,
           monthKey: item.monthKey,
-          genial:
-            item.genial !== 0
-              ? item.genial
-              : Number(atual?.genial || 0),
-          rico:
-            item.rico !== 0
-              ? item.rico
-              : Number(atual?.rico || 0),
+          genial: corretora === "Genial" ? item.valor : genialAtual,
+          rico: corretora === "Rico" ? item.valor : ricoAtual,
           updatedAt: Date.now(),
         },
         { merge: true }
@@ -109,11 +154,11 @@ export default function App() {
       setMensagem("Enviando para o Firebase...");
 
       if (arquivoGenial) {
-        await importarCSV(arquivoGenial, "Genial");
+        await salvarArquivoNoFirebase(arquivoGenial, "Genial");
       }
 
       if (arquivoRico) {
-        await importarCSV(arquivoRico, "Rico");
+        await salvarArquivoNoFirebase(arquivoRico, "Rico");
       }
 
       setMensagem("Salvo no Firebase 🚀");
