@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ResponsiveContainer,
   LineChart,
@@ -15,7 +15,7 @@ import {
   ReferenceLine,
 } from "recharts";
 
-const STORAGE_KEY = "dashboard_ec_professional_history_v1";
+const STORAGE_KEY = "dashboard_ec_auto_v1";
 
 const GENIAL_CSV_URL = "/genial.csv";
 const RICO_CSV_URL = "/rico.csv";
@@ -164,6 +164,8 @@ function normalizeDays(daysMap) {
   return Object.values(daysMap)
     .map((item) => ({
       ...item,
+      genial: item.genial || 0,
+      rico: item.rico || 0,
       total: (item.genial || 0) + (item.rico || 0),
     }))
     .sort((a, b) => a.dateKey.localeCompare(b.dateKey));
@@ -204,6 +206,7 @@ function CustomTooltip({ active, payload, label }) {
 
 export default function App() {
   const currentMonthKey = toMonthKey(new Date());
+  const autoLoadedRef = useRef(false);
 
   const [db, setDb] = useState({
     days: {},
@@ -469,10 +472,10 @@ export default function App() {
     return await res.text();
   }
 
-  async function atualizarDoPublic() {
+  async function atualizarDoPublic(showMessage = true) {
     try {
       setLoadingCsv(true);
-      setStatusMsg("Buscando arquivos CSV do site...");
+      if (showMessage) setStatusMsg("Buscando arquivos CSV do site...");
 
       const genialText = await fetchCsvText(GENIAL_CSV_URL);
       const ricoText = await fetchCsvText(RICO_CSV_URL);
@@ -487,14 +490,24 @@ export default function App() {
       upsertBrokerRows(genialRows, "genial");
       upsertBrokerRows(ricoRows, "rico");
 
-      setStatusMsg("Arquivos CSV atualizados com sucesso.");
+      if (showMessage) {
+        setStatusMsg("Arquivos CSV atualizados com sucesso.");
+      }
     } catch (err) {
       console.error(err);
-      setStatusMsg(`Erro ao buscar os CSVs do site: ${err.message}`);
+      if (showMessage) {
+        setStatusMsg(`Erro ao buscar os CSVs do site: ${err.message}`);
+      }
     } finally {
       setLoadingCsv(false);
     }
   }
+
+  useEffect(() => {
+    if (autoLoadedRef.current) return;
+    autoLoadedRef.current = true;
+    atualizarDoPublic(false);
+  }, []);
 
   function importManualFile(file, broker) {
     if (!file) return;
@@ -529,6 +542,16 @@ export default function App() {
     setSelectedDay("TODOS");
     setStatusMsg("Histórico completo apagado.");
   }
+
+  const ritmoColor =
+    progressoMeta >= 100 ? "#22c55e" : progressoMeta >= 70 ? "#facc15" : "#ef4444";
+
+  const ritmoTexto =
+    progressoMeta >= 100
+      ? "META BATIDA"
+      : progressoMeta >= 70
+      ? "NO RITMO CERTO"
+      : "ATRASADO";
 
   return (
     <div style={styles.page}>
@@ -607,7 +630,7 @@ export default function App() {
 
           <button
             style={styles.driveButton}
-            onClick={atualizarDoPublic}
+            onClick={() => atualizarDoPublic(true)}
             disabled={loadingCsv}
           >
             {loadingCsv ? "Atualizando..." : "Atualizar CSV"}
@@ -623,6 +646,10 @@ export default function App() {
         </div>
 
         {!!statusMsg && <div style={styles.statusMsg}>{statusMsg}</div>}
+
+        <div style={{ ...styles.ritmoBox, borderColor: ritmoColor }}>
+          <span style={{ color: ritmoColor, fontWeight: "800" }}>{ritmoTexto}</span>
+        </div>
 
         <div style={styles.topCards}>
           <Card
@@ -968,6 +995,14 @@ const styles = {
     marginBottom: 14,
     color: "#cbd5e1",
     fontSize: 14,
+  },
+  ritmoBox: {
+    textAlign: "center",
+    marginBottom: 16,
+    padding: "10px 14px",
+    borderRadius: 12,
+    border: "2px solid",
+    background: "#0b1324",
   },
   topCards: {
     display: "flex",
