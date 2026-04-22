@@ -499,11 +499,8 @@ export default function App() {
         ...item,
         genialLiquido,
         ricoLiquido,
-        totalLiquidoConsolidado: genialLiquido + ricoLiquido,
         totalLiquidoFiltrado,
-        operacoesTotal: opsGenial + opsRico,
         opsFiltradas,
-        custoTotal: (opsGenial + opsRico) * Number(custoOperacao || 0),
         custoFiltrado,
       };
     });
@@ -516,14 +513,11 @@ export default function App() {
 
   const totalGeral = dadosCalculados.reduce((acc, item) => acc + Number(item.totalLiquidoFiltrado || 0), 0);
   const totalMes = dadosMesCalculados.reduce((acc, item) => acc + Number(item.totalLiquidoFiltrado || 0), 0);
-
   const totalGenialMes = dadosMesCalculados.reduce((acc, item) => acc + Number(item.genialLiquido || 0), 0);
   const totalRicoMes = dadosMesCalculados.reduce((acc, item) => acc + Number(item.ricoLiquido || 0), 0);
-
   const totalOpsMes = dadosMesCalculados.reduce((acc, item) => acc + Number(item.opsFiltradas || 0), 0);
   const opsGenialMes = dadosMesCalculados.reduce((acc, item) => acc + Number(item.opsGenial || 0), 0);
   const opsRicoMes = dadosMesCalculados.reduce((acc, item) => acc + Number(item.opsRico || 0), 0);
-
   const custoTotalMes = dadosMesCalculados.reduce((acc, item) => acc + Number(item.custoFiltrado || 0), 0);
 
   const progressoMensal = metaMensal > 0 ? (totalMes / metaMensal) * 100 : 0;
