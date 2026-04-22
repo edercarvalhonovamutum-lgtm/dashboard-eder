@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { db } from "./firebase";
 import {
   collection,
@@ -51,7 +51,6 @@ function parseProfitCsv(text) {
 
   for (let i = 0; i < linhas.length; i++) {
     const cols = splitLine(linhas[i]);
-
     if (!cols || cols.length < 18) continue;
 
     const dataRaw = String(cols[2] || "").trim();
@@ -111,7 +110,6 @@ function getPreviousMonthKey(monthKey) {
   const [anoStr, mesStr] = monthKey.split("-");
   const ano = Number(anoStr);
   const mes = Number(mesStr);
-
   const data = new Date(ano, mes - 2, 1);
   const y = data.getFullYear();
   const m = String(data.getMonth() + 1).padStart(2, "0");
@@ -140,84 +138,118 @@ function getBusinessDaysRemaining(monthKey) {
     const day = d.getDay();
     if (day !== 0 && day !== 6) total++;
   }
-
   return total;
 }
 
-function Card({ titulo, valor, cor = "#00ff88", subtitulo = "" }) {
+function getStatus(progressoMensal) {
+  if (progressoMensal >= 100) {
+    return { text: "TARGET ACHIEVED", color: "#00ff88" };
+  }
+  if (progressoMensal >= 70) {
+    return { text: "ON TRACK", color: "#FFD700" };
+  }
+  return { text: "BEHIND", color: "#ff4d4f" };
+}
+
+function StatCard({ title, value, sub, color = "#00ff88" }) {
   return (
     <div
       style={{
-        background: "linear-gradient(180deg, #0f172a 0%, #08101f 100%)",
+        background: "linear-gradient(180deg, rgba(15,23,42,0.95) 0%, rgba(6,13,26,0.95) 100%)",
+        border: "1px solid rgba(255,255,255,0.06)",
+        borderRadius: 18,
         padding: 16,
-        borderRadius: 16,
-        textAlign: "center",
-        border: "1px solid #162033",
-        boxShadow: "0 0 0 1px rgba(255,255,255,0.02) inset",
+        boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
+        minHeight: 108,
       }}
     >
-      <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 8 }}>
-        {titulo}
+      <div style={{ color: "#7c8ba1", fontSize: 11, marginBottom: 10, letterSpacing: 0.6 }}>
+        {title}
       </div>
       <div
         style={{
-          fontSize: 28,
-          color: cor,
-          fontWeight: "800",
-          lineHeight: 1.1,
+          color,
+          fontWeight: 800,
+          fontSize: 18,
+          lineHeight: 1.2,
           whiteSpace: "pre-line",
         }}
       >
-        {valor}
+        {value}
       </div>
-      {!!subtitulo && (
-        <div style={{ fontSize: 11, color: "#64748b", marginTop: 8 }}>
-          {subtitulo}
-        </div>
-      )}
+      {sub ? (
+        <div style={{ color: "#64748b", fontSize: 11, marginTop: 10 }}>{sub}</div>
+      ) : null}
     </div>
   );
 }
 
-function RankingCard({ titulo, itens, cor }) {
+function ProgressBlock({ title, value, color }) {
   return (
     <div
       style={{
-        background: "linear-gradient(180deg, #0f172a 0%, #08101f 100%)",
+        background: "linear-gradient(180deg, rgba(15,23,42,0.95) 0%, rgba(6,13,26,0.95) 100%)",
+        border: "1px solid rgba(255,255,255,0.06)",
+        borderRadius: 18,
         padding: 16,
-        borderRadius: 16,
-        textAlign: "left",
-        border: "1px solid #162033",
+        boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
       }}
     >
+      <div style={{ marginBottom: 10, fontWeight: 700 }}>{title}</div>
       <div
         style={{
-          fontSize: 14,
-          color: "#e2e8f0",
-          marginBottom: 12,
-          fontWeight: "700",
+          width: "100%",
+          height: 16,
+          background: "#182235",
+          borderRadius: 999,
+          overflow: "hidden",
         }}
       >
-        {titulo}
+        <div
+          style={{
+            width: `${Math.min(Math.max(value, 0), 100)}%`,
+            height: "100%",
+            background: color,
+            borderRadius: 999,
+            boxShadow: `0 0 18px ${color}55`,
+          }}
+        />
       </div>
+      <div style={{ marginTop: 8, color: "#cbd5e1", fontWeight: 700 }}>
+        {value.toFixed(1)}%
+      </div>
+    </div>
+  );
+}
 
-      {itens.length === 0 ? (
-        <div style={{ color: "#64748b", fontSize: 13 }}>Sem dados</div>
+function RankingCard({ title, items, color }) {
+  return (
+    <div
+      style={{
+        background: "linear-gradient(180deg, rgba(15,23,42,0.95) 0%, rgba(6,13,26,0.95) 100%)",
+        border: "1px solid rgba(255,255,255,0.06)",
+        borderRadius: 18,
+        padding: 16,
+        boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
+      }}
+    >
+      <div style={{ fontWeight: 700, marginBottom: 12 }}>{title}</div>
+      {items.length === 0 ? (
+        <div style={{ color: "#64748b" }}>Sem dados</div>
       ) : (
-        itens.map((item, idx) => (
+        items.map((item, idx) => (
           <div
             key={`${item.dateKey}-${idx}`}
             style={{
               display: "flex",
               justifyContent: "space-between",
               padding: "8px 0",
-              borderBottom:
-                idx !== itens.length - 1 ? "1px solid #162033" : "none",
-              gap: 12,
+              borderBottom: idx === items.length - 1 ? "none" : "1px solid rgba(255,255,255,0.05)",
+              gap: 10,
             }}
           >
-            <div style={{ color: "#cbd5e1", fontSize: 13 }}>{item.shortDate}</div>
-            <div style={{ color: cor, fontWeight: "700", fontSize: 13 }}>
+            <div style={{ color: "#dbe4ee", fontSize: 13 }}>{item.shortDate}</div>
+            <div style={{ color, fontWeight: 800, fontSize: 13 }}>
               {formatMoney(item.totalLiquido)}
             </div>
           </div>
@@ -227,63 +259,49 @@ function RankingCard({ titulo, itens, cor }) {
   );
 }
 
-function CapitalCurve({ data }) {
-  if (!data || data.length === 0) {
+function SimpleLineChart({ title, values, labels = [], lineColor = "#00ffd5", accentText }) {
+  if (!values.length) {
     return (
       <div
         style={{
-          height: 240,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: "#64748b",
+          background: "linear-gradient(180deg, rgba(15,23,42,0.95) 0%, rgba(6,13,26,0.95) 100%)",
+          border: "1px solid rgba(255,255,255,0.06)",
+          borderRadius: 18,
+          padding: 16,
+          boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
         }}
       >
-        Sem dados para curva
+        <div style={{ fontWeight: 700, marginBottom: 12 }}>{title}</div>
+        <div style={{ height: 240, display: "flex", alignItems: "center", justifyContent: "center", color: "#64748b" }}>
+          Sem dados
+        </div>
       </div>
     );
   }
 
-  const valores = [];
-  let acumulado = 0;
-  for (const item of data) {
-    acumulado += Number(item.totalLiquido || 0);
-    valores.push(acumulado);
-  }
-
-  const minVal = Math.min(...valores, 0);
-  const maxVal = Math.max(...valores, 0);
-
   const width = 900;
-  const height = 220;
-  const padding = 20;
+  const height = 240;
+  const padding = 22;
+  const minVal = Math.min(...values);
+  const maxVal = Math.max(...values);
+  const range = maxVal - minVal || 1;
 
-  const scaleX = (idx) => {
-    if (valores.length === 1) return padding;
-    return padding + (idx * (width - padding * 2)) / (valores.length - 1);
-  };
+  const scaleX = (idx) =>
+    padding + (idx * (width - padding * 2)) / Math.max(values.length - 1, 1);
 
-  const scaleY = (value) => {
-    if (maxVal === minVal) return height / 2;
-    return (
-      padding +
-      ((maxVal - value) * (height - padding * 2)) / (maxVal - minVal)
-    );
-  };
+  const scaleY = (value) =>
+    padding + ((maxVal - value) * (height - padding * 2)) / range;
 
-  const points = valores
-    .map((v, i) => `${scaleX(i)},${scaleY(v)}`)
-    .join(" ");
-
-  const ultimo = valores[valores.length - 1];
+  const points = values.map((v, i) => `${scaleX(i)},${scaleY(v)}`).join(" ");
 
   return (
     <div
       style={{
-        background: "linear-gradient(180deg, #0f172a 0%, #08101f 100%)",
-        borderRadius: 16,
-        border: "1px solid #162033",
+        background: "linear-gradient(180deg, rgba(15,23,42,0.95) 0%, rgba(6,13,26,0.95) 100%)",
+        border: "1px solid rgba(255,255,255,0.06)",
+        borderRadius: 18,
         padding: 16,
+        boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
       }}
     >
       <div
@@ -291,31 +309,45 @@ function CapitalCurve({ data }) {
           marginBottom: 12,
           display: "flex",
           justifyContent: "space-between",
-          alignItems: "center",
+          gap: 10,
           flexWrap: "wrap",
-          gap: 8,
         }}
       >
-        <div style={{ fontWeight: "700" }}>Curva de Capital</div>
-        <div style={{ color: "#00ff88", fontWeight: "700" }}>
-          Acumulado do mês: {formatMoney(ultimo)}
-        </div>
+        <div style={{ fontWeight: 700 }}>{title}</div>
+        {accentText ? (
+          <div style={{ color: lineColor, fontWeight: 800 }}>{accentText}</div>
+        ) : null}
       </div>
 
-      <svg
-        viewBox={`0 0 ${width} ${height}`}
-        style={{ width: "100%", height: 240, display: "block" }}
-      >
-        <rect x="0" y="0" width={width} height={height} fill="#0b1220" rx="12" />
+      <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", height: 240, display: "block" }}>
+        <rect x="0" y="0" width={width} height={height} fill="#0b1220" rx="14" />
         <polyline
           fill="none"
-          stroke="#00ffd5"
+          stroke={lineColor}
           strokeWidth="4"
           points={points}
           strokeLinejoin="round"
           strokeLinecap="round"
         />
       </svg>
+
+      {labels.length > 0 ? (
+        <div
+          style={{
+            marginTop: 10,
+            color: "#64748b",
+            fontSize: 11,
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 10,
+            overflow: "hidden",
+          }}
+        >
+          <span>{labels[0]}</span>
+          <span>{labels[Math.floor((labels.length - 1) / 2)] || ""}</span>
+          <span>{labels[labels.length - 1]}</span>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -330,6 +362,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [mensagem, setMensagem] = useState("");
   const [mesSelecionado, setMesSelecionado] = useState("");
+  const [diaSelecionado, setDiaSelecionado] = useState("");
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "trades"), (snap) => {
@@ -337,7 +370,6 @@ export default function App() {
       snap.forEach((docSnap) => {
         lista.push(docSnap.data());
       });
-
       lista.sort((a, b) => String(a.dateKey).localeCompare(String(b.dateKey)));
       setDados(lista);
     });
@@ -362,7 +394,6 @@ export default function App() {
     for (const item of agrupado) {
       const ref = doc(db, "trades", item.dateKey);
       const existente = await getDoc(ref);
-
       const atual = existente.exists() ? existente.data() : {};
 
       const genialAtual = Number(atual.genial || 0);
@@ -403,7 +434,6 @@ export default function App() {
       if (arquivoGenial) {
         await salvarArquivoNoFirebase(arquivoGenial, "Genial");
       }
-
       if (arquivoRico) {
         await salvarArquivoNoFirebase(arquivoRico, "Rico");
       }
@@ -449,55 +479,22 @@ export default function App() {
     return dadosCalculados.filter((item) => item.monthKey === mesSelecionado);
   }, [dadosCalculados, mesSelecionado]);
 
-  const totalGeral = dadosCalculados.reduce(
-    (acc, item) => acc + Number(item.totalLiquido || 0),
-    0
-  );
+  const totalGeral = dadosCalculados.reduce((acc, item) => acc + Number(item.totalLiquido || 0), 0);
+  const totalMes = dadosMesCalculados.reduce((acc, item) => acc + Number(item.totalLiquido || 0), 0);
+  const totalGenialMes = dadosMesCalculados.reduce((acc, item) => acc + Number(item.genialLiquido || 0), 0);
+  const totalRicoMes = dadosMesCalculados.reduce((acc, item) => acc + Number(item.ricoLiquido || 0), 0);
 
-  const totalMes = dadosMesCalculados.reduce(
-    (acc, item) => acc + Number(item.totalLiquido || 0),
-    0
-  );
-
-  const totalGenialMes = dadosMesCalculados.reduce(
-    (acc, item) => acc + Number(item.genialLiquido || 0),
-    0
-  );
-
-  const totalRicoMes = dadosMesCalculados.reduce(
-    (acc, item) => acc + Number(item.ricoLiquido || 0),
-    0
-  );
-
-  const totalOperacoesMes = dadosMesCalculados.reduce(
-    (acc, item) => acc + Number(item.operacoesTotal || 0),
-    0
-  );
-
-  const custoTotalMes = dadosMesCalculados.reduce(
-    (acc, item) => acc + Number(item.custoTotal || 0),
-    0
-  );
+  const totalOpsMes = dadosMesCalculados.reduce((acc, item) => acc + Number(item.operacoesTotal || 0), 0);
+  const opsGenialMes = dadosMesCalculados.reduce((acc, item) => acc + Number(item.opsGenial || 0), 0);
+  const opsRicoMes = dadosMesCalculados.reduce((acc, item) => acc + Number(item.opsRico || 0), 0);
+  const custoTotalMes = dadosMesCalculados.reduce((acc, item) => acc + Number(item.custoTotal || 0), 0);
 
   const progressoMensal = metaMensal > 0 ? (totalMes / metaMensal) * 100 : 0;
   const progressoAnual = metaAnual > 0 ? (totalGeral / metaAnual) * 100 : 0;
-
   const faltaMensal = metaMensal - totalMes;
   const faltaAnual = metaAnual - totalGeral;
 
-  const status =
-    progressoMensal >= 100
-      ? "TARGET ACHIEVED"
-      : progressoMensal >= 70
-      ? "ON TRACK"
-      : "BEHIND";
-
-  const corStatus =
-    progressoMensal >= 100
-      ? "#00ff88"
-      : progressoMensal >= 70
-      ? "#FFD700"
-      : "#ff4d4f";
+  const status = getStatus(progressoMensal);
 
   const diasOrdenadosMes = [...dadosMesCalculados].sort((a, b) =>
     String(a.dateKey).localeCompare(String(b.dateKey))
@@ -506,32 +503,38 @@ export default function App() {
   const melhorDia =
     diasOrdenadosMes.length > 0
       ? diasOrdenadosMes.reduce((max, item) =>
-          Number(item.totalLiquido || 0) > Number(max.totalLiquido || 0)
-            ? item
-            : max
+          Number(item.totalLiquido || 0) > Number(max.totalLiquido || 0) ? item : max
         )
       : null;
 
   const piorDia =
     diasOrdenadosMes.length > 0
       ? diasOrdenadosMes.reduce((min, item) =>
-          Number(item.totalLiquido || 0) < Number(min.totalLiquido || 0)
-            ? item
-            : min
+          Number(item.totalLiquido || 0) < Number(min.totalLiquido || 0) ? item : min
         )
       : null;
 
-  const mediaDia =
-    diasOrdenadosMes.length > 0 ? totalMes / diasOrdenadosMes.length : 0;
+  const mediaDia = diasOrdenadosMes.length > 0 ? totalMes / diasOrdenadosMes.length : 0;
 
   let pico = 0;
-  let drawdown = 0;
+  let drawdownMax = 0;
   let acumulado = 0;
-  for (const item of diasOrdenadosMes) {
+  const curvaCapital = [];
+  const curvaDrawdown = [];
+  const curvaDiasOperacao = [];
+  const labelsDias = [];
+
+  for (let i = 0; i < diasOrdenadosMes.length; i++) {
+    const item = diasOrdenadosMes[i];
     acumulado += Number(item.totalLiquido || 0);
     if (acumulado > pico) pico = acumulado;
     const ddAtual = pico - acumulado;
-    if (ddAtual > drawdown) drawdown = ddAtual;
+    if (ddAtual > drawdownMax) drawdownMax = ddAtual;
+
+    curvaCapital.push(acumulado);
+    curvaDrawdown.push(ddAtual);
+    curvaDiasOperacao.push(Number(item.totalLiquido || 0));
+    labelsDias.push(item.shortDate);
   }
 
   const topDias = [...diasOrdenadosMes]
@@ -554,28 +557,22 @@ export default function App() {
 
   const diasUteisRestantes = getBusinessDaysRemaining(mesSelecionado);
   const valorPorDia =
-    faltaMensal > 0 && diasUteisRestantes > 0
-      ? faltaMensal / diasUteisRestantes
-      : 0;
+    faltaMensal > 0 && diasUteisRestantes > 0 ? faltaMensal / diasUteisRestantes : 0;
+
+  const datasDisponiveis = diasOrdenadosMes.map((item) => item.dateKey);
+  const diaFiltrado = diasOrdenadosMes.find((item) => item.dateKey === diaSelecionado);
 
   return (
     <div
       style={{
-        background:
-          "radial-gradient(circle at top, #071325 0%, #020617 45%, #01040d 100%)",
+        background: "radial-gradient(circle at top, #071325 0%, #020617 45%, #01040d 100%)",
         minHeight: "100vh",
         color: "white",
         padding: "28px 20px 40px",
         fontFamily: "Arial, sans-serif",
       }}
     >
-      <div
-        style={{
-          maxWidth: "1250px",
-          margin: "0 auto",
-          textAlign: "center",
-        }}
-      >
+      <div style={{ maxWidth: "1280px", margin: "0 auto", textAlign: "center" }}>
         <h1
           style={{
             color: "#00ffd5",
@@ -599,30 +596,14 @@ export default function App() {
             marginBottom: "18px",
           }}
         >
-          <input
-            type="file"
-            accept=".csv"
-            onChange={(e) => setArquivoGenial(e.target.files?.[0] || null)}
-            style={{ color: "white" }}
-          />
-
-          <input
-            type="file"
-            accept=".csv"
-            onChange={(e) => setArquivoRico(e.target.files?.[0] || null)}
-            style={{ color: "white" }}
-          />
+          <input type="file" accept=".csv" onChange={(e) => setArquivoGenial(e.target.files?.[0] || null)} style={{ color: "white" }} />
+          <input type="file" accept=".csv" onChange={(e) => setArquivoRico(e.target.files?.[0] || null)} style={{ color: "white" }} />
 
           <input
             type="number"
             value={metaMensal}
             onChange={(e) => setMetaMensal(Number(e.target.value) || 0)}
-            style={{
-              padding: "8px",
-              borderRadius: "8px",
-              border: "none",
-              width: "105px",
-            }}
+            style={{ padding: "8px", borderRadius: "8px", border: "none", width: "110px" }}
             placeholder="Meta mês"
           />
 
@@ -630,12 +611,7 @@ export default function App() {
             type="number"
             value={metaAnual}
             onChange={(e) => setMetaAnual(Number(e.target.value) || 0)}
-            style={{
-              padding: "8px",
-              borderRadius: "8px",
-              border: "none",
-              width: "105px",
-            }}
+            style={{ padding: "8px", borderRadius: "8px", border: "none", width: "110px" }}
             placeholder="Meta ano"
           />
 
@@ -644,24 +620,14 @@ export default function App() {
             step="0.01"
             value={custoOperacao}
             onChange={(e) => setCustoOperacao(Number(e.target.value) || 0)}
-            style={{
-              padding: "8px",
-              borderRadius: "8px",
-              border: "none",
-              width: "95px",
-            }}
+            style={{ padding: "8px", borderRadius: "8px", border: "none", width: "90px" }}
             placeholder="Custo/op"
           />
 
           <select
             value={mesSelecionado}
             onChange={(e) => setMesSelecionado(e.target.value)}
-            style={{
-              padding: "8px",
-              borderRadius: "8px",
-              border: "none",
-              width: "140px",
-            }}
+            style={{ padding: "8px", borderRadius: "8px", border: "none", width: "140px" }}
           >
             {mesesDisponiveis.map((mes) => (
               <option key={mes} value={mes}>
@@ -690,29 +656,23 @@ export default function App() {
 
         <div
           style={{
-            border: `2px solid ${corStatus}`,
+            border: `2px solid ${status.color}`,
             marginTop: 10,
             marginBottom: 20,
             padding: 12,
             textAlign: "center",
             borderRadius: 12,
-            color: corStatus,
+            color: status.color,
             fontWeight: "800",
             fontSize: "24px",
-            boxShadow: `0 0 18px ${corStatus}22`,
+            boxShadow: `0 0 18px ${status.color}22`,
           }}
         >
-          {status}
+          {status.text}
         </div>
 
         {!!mensagem && (
-          <div
-            style={{
-              marginBottom: 20,
-              color: "#cbd5e1",
-              fontSize: "15px",
-            }}
-          >
+          <div style={{ marginBottom: 20, color: "#cbd5e1", fontSize: "15px" }}>
             {mensagem}
           </div>
         )}
@@ -729,167 +689,144 @@ export default function App() {
             gap: "14px",
           }}
         >
-          <Card titulo="TOTAL GERAL" valor={formatMoney(totalGeral)} cor="#00ff88" />
-          <Card titulo="TOTAL DO MÊS" valor={formatMoney(totalMes)} cor="#00ffd5" />
-          <Card titulo="GENIAL" valor={formatMoney(totalGenialMes)} cor="#60a5fa" />
-          <Card titulo="RICO" valor={formatMoney(totalRicoMes)} cor="#fbbf24" />
-          <Card titulo="META MENSAL" valor={formatMoney(metaMensal)} cor="#22c55e" />
-          <Card titulo="CUSTO / OP" valor={formatMoney(custoOperacao)} cor="#e5e7eb" />
-          <Card titulo="OPS NO MÊS" valor={String(totalOperacoesMes)} cor="#fbbf24" />
-          <Card titulo="CUSTO TOTAL MÊS" valor={formatMoney(custoTotalMes)} cor="#ff4d4f" />
-          <Card
-            titulo="FALTA MÊS"
-            valor={formatMoney(faltaMensal)}
-            cor={faltaMensal <= 0 ? "#00ff88" : "#ff4d4f"}
+          <StatCard title="TOTAL GERAL" value={formatMoney(totalGeral)} color="#00ff88" />
+          <StatCard title="TOTAL DO MÊS" value={formatMoney(totalMes)} color="#00ffd5" />
+          <StatCard title="GENIAL" value={formatMoney(totalGenialMes)} color="#60a5fa" />
+          <StatCard title="RICO" value={formatMoney(totalRicoMes)} color="#fbbf24" />
+          <StatCard title="META MENSAL" value={formatMoney(metaMensal)} color="#22c55e" />
+          <StatCard title="META ANUAL" value={formatMoney(metaAnual)} color="#22c55e" />
+          <StatCard title="FALTA MÊS" value={formatMoney(faltaMensal)} color={faltaMensal <= 0 ? "#00ff88" : "#ff4d4f"} />
+          <StatCard title="FALTA ANO" value={formatMoney(faltaAnual)} color={faltaAnual <= 0 ? "#00ff88" : "#ff4d4f"} />
+          <StatCard title="CUSTO / OP" value={formatMoney(custoOperacao)} color="#e5e7eb" />
+          <StatCard title="OPS GENIAL" value={String(opsGenialMes)} color="#60a5fa" />
+          <StatCard title="OPS RICO" value={String(opsRicoMes)} color="#fbbf24" />
+          <StatCard title="OPS NO MÊS" value={String(totalOpsMes)} color="#ffd84d" />
+          <StatCard title="CUSTO TOTAL MÊS" value={formatMoney(custoTotalMes)} color="#ff4d4f" />
+          <StatCard
+            title="VALOR POR DIA"
+            value={formatMoney(valorPorDia)}
+            color="#38bdf8"
+            sub={diasUteisRestantes > 0 ? `${diasUteisRestantes} dias úteis restantes` : "somente para mês atual"}
           />
-          <Card
-            titulo="VALOR POR DIA"
-            valor={formatMoney(valorPorDia)}
-            cor="#38bdf8"
-            subtitulo={
-              diasUteisRestantes > 0
-                ? `${diasUteisRestantes} dias úteis restantes`
-                : "somente para mês atual"
-            }
+          <StatCard title="MÊS ANTERIOR" value={formatMoney(totalMesAnterior)} color="#cbd5e1" />
+          <StatCard
+            title="VARIAÇÃO VS MÊS ANT."
+            value={`${variacaoMesAnterior.toFixed(1)}%`}
+            color={variacaoMesAnterior >= 0 ? "#00ff88" : "#ff4d4f"}
           />
-          <Card titulo="META ANUAL" valor={formatMoney(metaAnual)} cor="#22c55e" />
-          <Card
-            titulo="FALTA ANO"
-            valor={formatMoney(faltaAnual)}
-            cor={faltaAnual <= 0 ? "#00ff88" : "#ff4d4f"}
-          />
+          <StatCard title="DRAWDOWN" value={formatMoney(drawdownMax)} color="#ff4d4f" />
+          <StatCard title="MÉDIA POR DIA" value={formatMoney(mediaDia)} color="#38bdf8" />
+          <StatCard title="DIAS NO MÊS" value={String(diasOrdenadosMes.length)} color="#e5e7eb" />
         </div>
 
         <div
           style={{
-            marginTop: 18,
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-            gap: "14px",
-          }}
-        >
-          <Card titulo="MÊS ANTERIOR" valor={formatMoney(totalMesAnterior)} cor="#cbd5e1" />
-          <Card
-            titulo="VARIAÇÃO VS MÊS ANT."
-            valor={`${variacaoMesAnterior.toFixed(1)}%`}
-            cor={variacaoMesAnterior >= 0 ? "#00ff88" : "#ff4d4f"}
-          />
-          <Card titulo="DRAWDOWN" valor={formatMoney(drawdown)} cor="#ff4d4f" />
-          <Card titulo="MÉDIA POR DIA" valor={formatMoney(mediaDia)} cor="#38bdf8" />
-        </div>
-
-        <div
-          style={{
-            marginTop: 24,
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-            gap: "14px",
-          }}
-        >
-          <Card
-            titulo="MELHOR DIA"
-            valor={
-              melhorDia
-                ? `${melhorDia.shortDate} • ${formatMoney(melhorDia.totalLiquido)}`
-                : "R$ 0.00"
-            }
-            cor="#00ff88"
-          />
-          <Card
-            titulo="PIOR DIA"
-            valor={
-              piorDia
-                ? `${piorDia.shortDate} • ${formatMoney(piorDia.totalLiquido)}`
-                : "R$ 0.00"
-            }
-            cor="#ff4d4f"
-          />
-          <Card titulo="DIAS NO MÊS" valor={String(diasOrdenadosMes.length)} cor="#e5e7eb" />
-          <Card titulo="PROGRESSO MÊS" valor={`${progressoMensal.toFixed(1)}%`} cor="#00ffd5" />
-        </div>
-
-        <div style={{ marginTop: 24 }}>
-          <CapitalCurve data={diasOrdenadosMes} />
-        </div>
-
-        <div
-          style={{
-            marginTop: 20,
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-            gap: "14px",
-          }}
-        >
-          <RankingCard titulo="Top 5 Melhores Dias" itens={topDias} cor="#00ff88" />
-          <RankingCard titulo="Top 5 Piores Dias" itens={pioresDias} cor="#ff4d4f" />
-        </div>
-
-        <div
-          style={{
-            marginTop: 30,
-            background: "#0f172a",
-            borderRadius: 16,
+            marginTop: 22,
+            background: "linear-gradient(180deg, rgba(15,23,42,0.95) 0%, rgba(6,13,26,0.95) 100%)",
+            border: "1px solid rgba(255,255,255,0.06)",
+            borderRadius: 18,
             padding: 16,
-            textAlign: "left",
-            border: "1px solid #172033",
+            boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
           }}
         >
-          <div style={{ marginBottom: 8, fontWeight: "700" }}>
-            Progress Monthly
-          </div>
+          <div style={{ marginBottom: 12, fontWeight: 700 }}>Filtro por Dia</div>
+
           <div
             style={{
-              width: "100%",
-              height: 16,
-              background: "#1e293b",
-              borderRadius: 999,
-              overflow: "hidden",
+              display: "flex",
+              gap: 12,
+              flexWrap: "wrap",
+              alignItems: "center",
+              justifyContent: "center",
             }}
           >
+            <select
+              value={diaSelecionado}
+              onChange={(e) => setDiaSelecionado(e.target.value)}
+              style={{ padding: "8px", borderRadius: "8px", border: "none", width: "160px" }}
+            >
+              <option value="">Selecione o dia</option>
+              {datasDisponiveis.map((data) => (
+                <option key={data} value={data}>
+                  {data}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {diaFiltrado ? (
             <div
               style={{
-                width: `${Math.min(progressoMensal, 100)}%`,
-                height: "100%",
-                background: "#00ff88",
-                borderRadius: 999,
+                marginTop: 16,
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                gap: 12,
               }}
-            />
-          </div>
-          <div style={{ marginTop: 8 }}>{progressoMensal.toFixed(1)}%</div>
+            >
+              <StatCard title="DATA" value={diaFiltrado.shortDate} color="#e5e7eb" />
+              <StatCard title="GENIAL DIA" value={formatMoney(diaFiltrado.genialLiquido)} color="#60a5fa" />
+              <StatCard title="RICO DIA" value={formatMoney(diaFiltrado.ricoLiquido)} color="#fbbf24" />
+              <StatCard title="TOTAL DIA" value={formatMoney(diaFiltrado.totalLiquido)} color="#00ff88" />
+              <StatCard title="OPS GENIAL DIA" value={String(diaFiltrado.opsGenial || 0)} color="#60a5fa" />
+              <StatCard title="OPS RICO DIA" value={String(diaFiltrado.opsRico || 0)} color="#fbbf24" />
+              <StatCard title="CUSTO DIA" value={formatMoney(diaFiltrado.custoTotal)} color="#ff4d4f" />
+            </div>
+          ) : null}
         </div>
 
         <div
           style={{
-            marginTop: 20,
-            background: "#0f172a",
-            borderRadius: 16,
-            padding: 16,
-            textAlign: "left",
-            border: "1px solid #172033",
+            marginTop: 22,
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+            gap: "14px",
           }}
         >
-          <div style={{ marginBottom: 8, fontWeight: "700" }}>
-            Progress Annual
-          </div>
-          <div
-            style={{
-              width: "100%",
-              height: 16,
-              background: "#1e293b",
-              borderRadius: 999,
-              overflow: "hidden",
-            }}
-          >
-            <div
-              style={{
-                width: `${Math.min(progressoAnual, 100)}%`,
-                height: "100%",
-                background: "#38bdf8",
-                borderRadius: 999,
-              }}
-            />
-          </div>
-          <div style={{ marginTop: 8 }}>{progressoAnual.toFixed(1)}%</div>
+          <ProgressBlock title="Progress Monthly" value={progressoMensal} color="#00ff88" />
+          <ProgressBlock title="Progress Annual" value={progressoAnual} color="#38bdf8" />
+        </div>
+
+        <div
+          style={{
+            marginTop: 22,
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+            gap: "14px",
+          }}
+        >
+          <SimpleLineChart
+            title="Curva de Capital"
+            values={curvaCapital}
+            labels={labelsDias}
+            lineColor="#00ffd5"
+            accentText={curvaCapital.length ? `Final: ${formatMoney(curvaCapital[curvaCapital.length - 1])}` : ""}
+          />
+          <SimpleLineChart
+            title="Curva de Drawdown"
+            values={curvaDrawdown}
+            labels={labelsDias}
+            lineColor="#ff4d4f"
+            accentText={formatMoney(drawdownMax)}
+          />
+          <SimpleLineChart
+            title="Curva de Dias de Operação"
+            values={curvaDiasOperacao}
+            labels={labelsDias}
+            lineColor="#38bdf8"
+            accentText={`${curvaDiasOperacao.length} dias`}
+          />
+        </div>
+
+        <div
+          style={{
+            marginTop: 22,
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+            gap: "14px",
+          }}
+        >
+          <RankingCard title="Top 5 Melhores Dias" items={topDias} color="#00ff88" />
+          <RankingCard title="Top 5 Piores Dias" items={pioresDias} color="#ff4d4f" />
         </div>
       </div>
     </div>
