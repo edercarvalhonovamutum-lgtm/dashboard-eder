@@ -20,6 +20,9 @@ import {
   CartesianGrid,
   AreaChart,
   Area,
+  BarChart,
+  Bar,
+  Legend,
 } from "recharts";
 
 const CUSTO_POR_OP = 2.9;
@@ -33,7 +36,6 @@ function toNumberBR(value) {
   if (value === null || value === undefined) return 0;
   const txt = String(value).trim();
   if (!txt) return 0;
-
   const cleaned = txt.replace(/\./g, "").replace(",", ".");
   const n = parseFloat(cleaned);
   return Number.isFinite(n) ? n : 0;
@@ -78,6 +80,12 @@ function businessDaysRemaining(monthKey) {
     if (day !== 0 && day !== 6) count++;
   }
   return count;
+}
+
+function previousMonthKey(monthKey) {
+  const [y, m] = monthKey.split("-").map(Number);
+  const d = new Date(y, m - 2, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
 function statusInfo(progress) {
@@ -136,7 +144,7 @@ function Panel({ title, value, color = "#00ff88", sub }) {
   );
 }
 
-function ChartCard({ title, children, rightLabel }) {
+function Card({ title, children, rightLabel, minHeight = 360 }) {
   return (
     <div
       style={{
@@ -145,7 +153,7 @@ function ChartCard({ title, children, rightLabel }) {
         borderRadius: 18,
         padding: 16,
         boxShadow: "0 10px 28px rgba(0,0,0,0.24)",
-        minHeight: 360,
+        minHeight,
       }}
     >
       <div
@@ -163,8 +171,38 @@ function ChartCard({ title, children, rightLabel }) {
           <div style={{ color: "#94a3b8", fontSize: 13, fontWeight: 700 }}>{rightLabel}</div>
         ) : null}
       </div>
-      <div style={{ width: "100%", height: 280 }}>{children}</div>
+      {children}
     </div>
+  );
+}
+
+function DayCell({ item, onClick, active }) {
+  const value = item?.total ?? 0;
+  const bg =
+    value > 0 ? "rgba(34,197,94,0.18)" : value < 0 ? "rgba(239,68,68,0.18)" : "rgba(148,163,184,0.10)";
+  const border =
+    value > 0 ? "1px solid rgba(34,197,94,0.45)" : value < 0 ? "1px solid rgba(239,68,68,0.45)" : "1px solid rgba(148,163,184,0.20)";
+  const outline = active ? "0 0 0 2px #00ffd5 inset" : "none";
+
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        width: "100%",
+        minHeight: 72,
+        borderRadius: 12,
+        border,
+        background: bg,
+        color: "#fff",
+        padding: 8,
+        textAlign: "left",
+        cursor: "pointer",
+        boxShadow: outline,
+      }}
+    >
+      <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 6 }}>{item.day}</div>
+      <div style={{ fontSize: 12, color: value >= 0 ? "#86efac" : "#fca5a5" }}>{money(value)}</div>
+    </button>
   );
 }
 
@@ -176,9 +214,11 @@ export default function App() {
   const [msg, setMsg] = useState("");
   const [docsMes, setDocsMes] = useState([]);
   const [docsAno, setDocsAno] = useState([]);
+  const [docsMesAnterior, setDocsMesAnterior] = useState([]);
   const [dataFiltro, setDataFiltro] = useState("");
 
   const anoSelecionado = mes.split("-")[0] || "2026";
+  const mesAnterior = previousMonthKey(mes);
 
   const carregarDados = async () => {
     try {
@@ -189,6 +229,14 @@ export default function App() {
       snapshotMes.forEach((d) => rowsMes.push(d.data()));
       rowsMes.sort((a, b) => String(a.dateKey || "").localeCompare(String(b.dateKey || "")));
       setDocsMes(rowsMes);
+
+      const qMesAnterior = query(collection(db, "trades"), where("monthKey", "==", mesAnterior));
+      const snapshotMesAnterior = await getDocs(qMesAnterior);
+
+      const rowsMesAnterior = [];
+      snapshotMesAnterior.forEach((d) => rowsMesAnterior.push(d.data()));
+      rowsMesAnterior.sort((a, b) => String(a.dateKey || "").localeCompare(String(b.dateKey || "")));
+      setDocsMesAnterior(rowsMesAnterior);
 
       const snapshotAno = await getDocs(collection(db, "trades"));
       const rowsAno = [];
@@ -298,8 +346,7 @@ export default function App() {
                 resOperacaoRaw === "" ||
                 resOperacaoRaw === undefined ||
                 resOperacaoRaw === null
-              )
-                return;
+              ) return;
 
               const dateInfo = normalizeDate(fechamento);
               if (!dateInfo) return;
@@ -397,8 +444,8 @@ export default function App() {
     }
   };
 
-  const calculado = useMemo(() => {
-    const rows = docsMes.map((item) => {
+  const enrichRows = (baseRows) =>
+    baseRows.map((item) => {
       const genial = Number(item.genial || 0);
       const rico = Number(item.rico || 0);
       const opsGenial = Number(item.opsGenial || 0);
@@ -419,6 +466,9 @@ export default function App() {
         custoTotal,
       };
     });
+
+  const calculado = useMemo(() => {
+    const rows = enrichRows(docsMes);
 
     const totalMes = rows.reduce((a, b) => a + b.totalLiquido, 0);
     const genialMes = rows.reduce((a, b) => a + b.genialLiquido, 0);
@@ -468,6 +518,12 @@ export default function App() {
 
     const mediaDia = rows.length ? totalMes / rows.length : 0;
 
+    const corretorasDia = rows.map((r) => ({
+      data: r.shortDate,
+      Genial: Number(r.genialLiquido.toFixed(2)),
+      Rico: Number(r.ricoLiquido.toFixed(2)),
+    }));
+
     return {
       rows,
       totalMes,
@@ -487,58 +543,46 @@ export default function App() {
       curvaDrawdown,
       drawdownMax,
       mediaDia,
+      corretorasDia,
     };
   }, [docsMes, mes, metaMensal]);
 
   const calculadoAno = useMemo(() => {
-    const rows = docsAno.map((item) => {
-      const genial = Number(item.genial || 0);
-      const rico = Number(item.rico || 0);
-      const opsGenial = Number(item.opsGenial || 0);
-      const opsRico = Number(item.opsRico || 0);
-
-      const genialLiquido = genial - opsGenial * CUSTO_POR_OP;
-      const ricoLiquido = rico - opsRico * CUSTO_POR_OP;
-      const totalLiquido = genialLiquido + ricoLiquido;
-
-      return {
-        ...item,
-        totalLiquido,
-      };
-    });
-
+    const rows = enrichRows(docsAno);
     const totalAno = rows.reduce((a, b) => a + b.totalLiquido, 0);
     const faltaAno = META_ANUAL_FIXA - totalAno;
     const progressoAno = META_ANUAL_FIXA > 0 ? (totalAno / META_ANUAL_FIXA) * 100 : 0;
 
-    return {
-      totalAno,
-      faltaAno,
-      progressoAno,
-    };
+    return { totalAno, faltaAno, progressoAno };
   }, [docsAno]);
+
+  const comparacaoMesAnterior = useMemo(() => {
+    const rowsAtual = enrichRows(docsMes);
+    const rowsAnterior = enrichRows(docsMesAnterior);
+
+    const totalAtual = rowsAtual.reduce((a, b) => a + b.totalLiquido, 0);
+    const totalAnterior = rowsAnterior.reduce((a, b) => a + b.totalLiquido, 0);
+    const diferenca = totalAtual - totalAnterior;
+    const variacaoPct =
+      totalAnterior !== 0 ? (diferenca / Math.abs(totalAnterior)) * 100 : 0;
+
+    return {
+      totalAtual,
+      totalAnterior,
+      diferenca,
+      variacaoPct,
+    };
+  }, [docsMes, docsMesAnterior]);
 
   const detalheDia = useMemo(() => {
     if (!dataFiltro) {
-      return {
-        genial: 0,
-        rico: 0,
-        total: 0,
-        opsGenial: 0,
-        opsRico: 0,
-      };
+      return { genial: 0, rico: 0, total: 0, opsGenial: 0, opsRico: 0 };
     }
 
     const item = docsMes.find((d) => d.dateKey === dataFiltro);
 
     if (!item) {
-      return {
-        genial: 0,
-        rico: 0,
-        total: 0,
-        opsGenial: 0,
-        opsRico: 0,
-      };
+      return { genial: 0, rico: 0, total: 0, opsGenial: 0, opsRico: 0 };
     }
 
     const genial = Number(item.genial || 0) - Number(item.opsGenial || 0) * CUSTO_POR_OP;
@@ -554,18 +598,45 @@ export default function App() {
     };
   }, [dataFiltro, docsMes]);
 
+  const calendario = useMemo(() => {
+    const [year, month] = mes.split("-").map(Number);
+    const daysInMonth = new Date(year, month, 0).getDate();
+
+    const map = {};
+    calculado.rows.forEach((r) => {
+      const day = Number(String(r.dateKey).split("-")[2]);
+      map[day] = {
+        day,
+        dateKey: r.dateKey,
+        total: r.totalLiquido,
+      };
+    });
+
+    const out = [];
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dateKey = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      out.push(
+        map[day] || {
+          day,
+          dateKey,
+          total: 0,
+        }
+      );
+    }
+    return out;
+  }, [mes, calculado.rows]);
+
   return (
     <div
       style={{
-        background:
-          "radial-gradient(circle at top, #071325 0%, #020617 45%, #01040d 100%)",
+        background: "radial-gradient(circle at top, #071325 0%, #020617 45%, #01040d 100%)",
         minHeight: "100vh",
         color: "white",
         padding: "28px 20px 40px",
         fontFamily: "Arial, sans-serif",
       }}
     >
-      <div style={{ maxWidth: 1280, margin: "0 auto", textAlign: "center" }}>
+      <div style={{ maxWidth: 1320, margin: "0 auto", textAlign: "center" }}>
         <h1
           style={{
             color: "#00ffd5",
@@ -725,6 +796,18 @@ export default function App() {
             value={money(calculadoAno.faltaAno)}
             color={calculadoAno.faltaAno <= 0 ? "#00ff88" : "#ff4d4f"}
           />
+          <Panel
+            title="MÊS ANTERIOR"
+            value={money(comparacaoMesAnterior.totalAnterior)}
+            color="#cbd5e1"
+            sub={mesAnterior}
+          />
+          <Panel
+            title="VS MÊS ANTERIOR"
+            value={`${comparacaoMesAnterior.variacaoPct.toFixed(1)}%`}
+            color={comparacaoMesAnterior.diferenca >= 0 ? "#00ff88" : "#ff4d4f"}
+            sub={`Diferença: ${money(comparacaoMesAnterior.diferenca)}`}
+          />
         </div>
 
         <div
@@ -735,19 +818,7 @@ export default function App() {
             gap: 14,
           }}
         >
-          <div
-            style={{
-              background: "linear-gradient(180deg, rgba(15,23,42,0.96) 0%, rgba(6,13,26,0.96) 100%)",
-              border: "1px solid rgba(255,255,255,0.06)",
-              borderRadius: 18,
-              padding: 16,
-              boxShadow: "0 10px 28px rgba(0,0,0,0.24)",
-            }}
-          >
-            <div style={{ fontWeight: 800, marginBottom: 12, fontSize: 16 }}>
-              Filtro por Dia
-            </div>
-
+          <Card title="Filtro por Dia" minHeight={220}>
             <input
               type="date"
               value={dataFiltro}
@@ -785,21 +856,9 @@ export default function App() {
                 Ops Rico: {detalheDia.opsRico}
               </div>
             </div>
-          </div>
+          </Card>
 
-          <div
-            style={{
-              background: "linear-gradient(180deg, rgba(15,23,42,0.96) 0%, rgba(6,13,26,0.96) 100%)",
-              border: "1px solid rgba(255,255,255,0.06)",
-              borderRadius: 18,
-              padding: 16,
-              boxShadow: "0 10px 28px rgba(0,0,0,0.24)",
-            }}
-          >
-            <div style={{ fontWeight: 800, marginBottom: 12, fontSize: 16 }}>
-              Progresso Anual
-            </div>
-
+          <Card title="Progresso Anual" minHeight={220}>
             <div
               style={{
                 width: "100%",
@@ -819,16 +878,10 @@ export default function App() {
               />
             </div>
 
-            <div
-              style={{
-                marginTop: 12,
-                color: "#cbd5e1",
-                fontWeight: 700,
-              }}
-            >
+            <div style={{ marginTop: 12, color: "#cbd5e1", fontWeight: 700 }}>
               {calculadoAno.progressoAno.toFixed(1)}% da meta anual
             </div>
-          </div>
+          </Card>
         </div>
 
         <div
@@ -839,63 +892,110 @@ export default function App() {
             gap: 16,
           }}
         >
-          <ChartCard
+          <Card
             title="Curva de Capital"
             rightLabel={`Final: ${money(calculado.totalMes)}`}
           >
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={calculado.curvaCapital}>
-                <CartesianGrid stroke="#1e293b" />
-                <XAxis dataKey="data" stroke="#94a3b8" />
-                <YAxis stroke="#94a3b8" />
-                <Tooltip
-                  formatter={(value) => money(value)}
-                  contentStyle={{
-                    background: "#020617",
-                    border: "1px solid #1e293b",
-                    borderRadius: 10,
-                    color: "#fff",
-                  }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="valor"
-                  stroke="#00ffd5"
-                  strokeWidth={3}
-                  dot={false}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </ChartCard>
+            <div style={{ width: "100%", height: 280 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={calculado.curvaCapital}>
+                  <CartesianGrid stroke="#1e293b" />
+                  <XAxis dataKey="data" stroke="#94a3b8" />
+                  <YAxis stroke="#94a3b8" />
+                  <Tooltip
+                    formatter={(value) => money(value)}
+                    contentStyle={{
+                      background: "#020617",
+                      border: "1px solid #1e293b",
+                      borderRadius: 10,
+                      color: "#fff",
+                    }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="valor"
+                    stroke="#00ffd5"
+                    strokeWidth={3}
+                    dot={false}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </Card>
 
-          <ChartCard
+          <Card
             title="Curva de Drawdown"
             rightLabel={`Máx: ${money(calculado.drawdownMax)}`}
           >
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={calculado.curvaDrawdown}>
-                <CartesianGrid stroke="#1e293b" />
-                <XAxis dataKey="data" stroke="#94a3b8" />
-                <YAxis stroke="#94a3b8" />
-                <Tooltip
-                  formatter={(value) => money(value)}
-                  contentStyle={{
-                    background: "#020617",
-                    border: "1px solid #1e293b",
-                    borderRadius: 10,
-                    color: "#fff",
-                  }}
+            <div style={{ width: "100%", height: 280 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={calculado.curvaDrawdown}>
+                  <CartesianGrid stroke="#1e293b" />
+                  <XAxis dataKey="data" stroke="#94a3b8" />
+                  <YAxis stroke="#94a3b8" />
+                  <Tooltip
+                    formatter={(value) => money(value)}
+                    contentStyle={{
+                      background: "#020617",
+                      border: "1px solid #1e293b",
+                      borderRadius: 10,
+                      color: "#fff",
+                    }}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="valor"
+                    stroke="#ff4d4f"
+                    fill="#ff4d4f55"
+                    strokeWidth={3}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          </Card>
+
+          <Card title="Genial x Rico por Dia" rightLabel="Comparativo diário">
+            <div style={{ width: "100%", height: 280 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={calculado.corretorasDia}>
+                  <CartesianGrid stroke="#1e293b" />
+                  <XAxis dataKey="data" stroke="#94a3b8" />
+                  <YAxis stroke="#94a3b8" />
+                  <Tooltip
+                    formatter={(value) => money(value)}
+                    contentStyle={{
+                      background: "#020617",
+                      border: "1px solid #1e293b",
+                      borderRadius: 10,
+                      color: "#fff",
+                    }}
+                  />
+                  <Legend />
+                  <Bar dataKey="Genial" fill="#60a5fa" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="Rico" fill="#fbbf24" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </Card>
+
+          <Card title="Calendário de Resultado" rightLabel="Verde = lucro / Vermelho = loss" minHeight={420}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(88px, 1fr))",
+                gap: 10,
+              }}
+            >
+              {calendario.map((item) => (
+                <DayCell
+                  key={item.dateKey}
+                  item={item}
+                  active={dataFiltro === item.dateKey}
+                  onClick={() => setDataFiltro(item.dateKey)}
                 />
-                <Area
-                  type="monotone"
-                  dataKey="valor"
-                  stroke="#ff4d4f"
-                  fill="#ff4d4f55"
-                  strokeWidth={3}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </ChartCard>
+              ))}
+            </div>
+          </Card>
         </div>
       </div>
     </div>
