@@ -1,187 +1,475 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Papa from "papaparse";
 import { db } from "./firebase";
 import {
-  doc,
-  setDoc,
-  deleteDoc,
   collection,
+  deleteDoc,
+  doc,
   getDocs,
+  query,
+  setDoc,
+  where,
 } from "firebase/firestore";
 
 const CUSTO_POR_OP = 2.9;
+
+function money(v) {
+  return `R$ ${Number(v || 0).toFixed(2)}`;
+}
+
+function toNumberBR(value) {
+  if (value === null || value === undefined) return 0;
+  const txt = String(value).trim();
+  if (!txt) return 0;
+  const cleaned = txt.replace(/\./g, "").replace(",", ".");
+  const n = parseFloat(cleaned);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function normalizeDate(raw) {
+  if (!raw) return null;
+  const txt = String(raw).trim().split(" ")[0];
+  const parts = txt.split("/");
+  if (parts.length !== 3) return null;
+
+  const dd = String(parts[0]).padStart(2, "0");
+  const mm = String(parts[1]).padStart(2, "0");
+  const yyyy = String(parts[2]);
+
+  return {
+    dd,
+    mm,
+    yyyy,
+    dateKey: `${yyyy}-${mm}-${dd}`,
+    shortDate: `${dd}/${mm}/${yyyy}`,
+    monthKey: `${yyyy}-${mm}`,
+  };
+}
+
+function businessDaysRemaining(monthKey) {
+  if (!monthKey) return 0;
+
+  const [y, m] = monthKey.split("-").map(Number);
+  const now = new Date();
+  const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+
+  if (monthKey !== currentMonthKey) return 0;
+
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const end = new Date(y, m, 0);
+
+  let count = 0;
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    const day = d.getDay();
+    if (day !== 0 && day !== 6) count++;
+  }
+  return count;
+}
+
+function Panel({ title, value, color = "#00ff88", sub }) {
+  return (
+    <div
+      style={{
+        background: "linear-gradient(180deg, rgba(15,23,42,0.96) 0%, rgba(6,13,26,0.96) 100%)",
+        border: "1px solid rgba(255,255,255,0.06)",
+        borderRadius: 18,
+        padding: 16,
+        minHeight: 108,
+        boxShadow: "0 10px 28px rgba(0,0,0,0.24)",
+      }}
+    >
+      <div
+        style={{
+          color: "#7c8ba1",
+          fontSize: 11,
+          marginBottom: 10,
+          letterSpacing: 0.7,
+          textTransform: "uppercase",
+        }}
+      >
+        {title}
+      </div>
+      <div style={{ color, fontWeight: 800, fontSize: 18, lineHeight: 1.2, whiteSpace: "pre-line" }}>
+        {value}
+      </div>
+      {sub ? <div style={{ color: "#64748b", fontSize: 11, marginTop: 10 }}>{sub}</div> : null}
+    </div>
+  );
+}
 
 export default function App() {
   const [genialFile, setGenialFile] = useState(null);
   const [ricoFile, setRicoFile] = useState(null);
   const [mes, setMes] = useState("2026-04");
+  const [metaMensal, setMetaMensal] = useState(10000);
+  const [msg, setMsg] = useState("");
 
-  // 🔥 LIMPAR MÊS
-  const limparMes = async () => {
-    const snapshot = await getDocs(collection(db, "trades"));
+  const [docsMes, setDocsMes] = useState([]);
 
-    for (let docSnap of snapshot.docs) {
-      if (docSnap.id.startsWith(mes)) {
-        await deleteDoc(doc(db, "trades", docSnap.id));
-      }
+  const carregarDados = async () => {
+    try {
+      const q = query(collection(db, "trades"), where("monthKey", "==", mes));
+      const snapshot = await getDocs(q);
+
+      const rows = [];
+      snapshot.forEach((d) => {
+        rows.push(d.data());
+      });
+
+      rows.sort((a, b) => String(a.dateKey || "").localeCompare(String(b.dateKey || "")));
+      setDocsMes(rows);
+    } catch (error) {
+      console.error(error);
+      setMsg("Erro ao carregar dados do Firebase.");
     }
-
-    alert("🔥 Mês limpo com sucesso!");
   };
 
-  // 🔥 PROCESSAR CSV
+  useEffect(() => {
+    carregarDados();
+  }, [mes]);
+
+  const limparMes = async () => {
+    try {
+      setMsg("Limpando mês no Firebase...");
+      const snapshot = await getDocs(collection(db, "trades"));
+
+      for (const docSnap of snapshot.docs) {
+        if (docSnap.id.startsWith(mes)) {
+          await deleteDoc(doc(db, "trades", docSnap.id));
+        }
+      }
+
+      setMsg("Mês limpo com sucesso.");
+      await carregarDados();
+      alert("🔥 Mês limpo com sucesso!");
+    } catch (error) {
+      console.error(error);
+      setMsg("Erro ao limpar mês.");
+      alert("Erro ao limpar mês.");
+    }
+  };
+
   const processCSV = (file, broker) => {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       Papa.parse(file, {
-        header: true,
+        header: false,
         skipEmptyLines: true,
         complete: (results) => {
-          const grouped = {};
+          try {
+            const rows = results.data || [];
+            let headerIndex = -1;
 
-          results.data.forEach((row) => {
-            const data = row["Data Abertura"];
-            const total = parseFloat(row["Total"]);
-
-            if (!data || isNaN(total)) return;
-
-            const date = data.split(" ")[0]; // dd/mm/yyyy
-
-            if (!grouped[date]) {
-              grouped[date] = {
-                genial: 0,
-                rico: 0,
-                opsGenial: 0,
-                opsRico: 0,
-              };
+            for (let i = 0; i < rows.length; i++) {
+              const row = rows[i].map((c) => String(c || "").trim());
+              if (row[0] === "Ativo" && row[1] === "Abertura" && row[row.length - 1] === "Total") {
+                headerIndex = i;
+                break;
+              }
             }
 
-            if (broker === "genial") {
-              grouped[date].genial += total;
-              grouped[date].opsGenial += 1;
-            } else {
-              grouped[date].rico += total;
-              grouped[date].opsRico += 1;
+            if (headerIndex === -1) {
+              reject(new Error(`Cabeçalho do CSV de ${broker} não encontrado.`));
+              return;
             }
-          });
 
-          resolve(grouped);
+            const dataRows = rows.slice(headerIndex + 1);
+            const grouped = {};
+
+            dataRows.forEach((rawRow) => {
+              const row = rawRow.map((c) => String(c || "").trim());
+              if (!row.length) return;
+
+              const dataAbertura = row[1];
+              const totalRaw = row[row.length - 1];
+
+              if (!dataAbertura || totalRaw === "") return;
+
+              const dateInfo = normalizeDate(dataAbertura);
+              if (!dateInfo) return;
+
+              const total = toNumberBR(totalRaw);
+
+              if (!grouped[dateInfo.dateKey]) {
+                grouped[dateInfo.dateKey] = {
+                  dateKey: dateInfo.dateKey,
+                  shortDate: dateInfo.shortDate,
+                  monthKey: dateInfo.monthKey,
+                  genial: 0,
+                  rico: 0,
+                  opsGenial: 0,
+                  opsRico: 0,
+                };
+              }
+
+              if (broker === "genial") {
+                grouped[dateInfo.dateKey].genial += total;
+                grouped[dateInfo.dateKey].opsGenial += 1;
+              } else {
+                grouped[dateInfo.dateKey].rico += total;
+                grouped[dateInfo.dateKey].opsRico += 1;
+              }
+            });
+
+            resolve(grouped);
+          } catch (err) {
+            reject(err);
+          }
         },
+        error: (err) => reject(err),
       });
     });
   };
 
-  // 🔥 SUBIR DADOS
   const uploadData = async () => {
-    const genialData = genialFile
-      ? await processCSV(genialFile, "genial")
-      : {};
+    try {
+      if (!genialFile && !ricoFile) {
+        alert("Escolha pelo menos um CSV.");
+        return;
+      }
 
-    const ricoData = ricoFile
-      ? await processCSV(ricoFile, "rico")
-      : {};
+      setMsg("Enviando CSV para o Firebase...");
 
-    const allDates = new Set([
-      ...Object.keys(genialData),
-      ...Object.keys(ricoData),
-    ]);
+      const genialData = genialFile ? await processCSV(genialFile, "genial") : {};
+      const ricoData = ricoFile ? await processCSV(ricoFile, "rico") : {};
 
-    for (let date of allDates) {
-      const g = genialData[date] || {};
-      const r = ricoData[date] || {};
+      const allDates = new Set([...Object.keys(genialData), ...Object.keys(ricoData)]);
 
-      const genial = g.genial || 0;
-      const rico = r.rico || 0;
+      for (const dateKey of allDates) {
+        const g = genialData[dateKey] || {};
+        const r = ricoData[dateKey] || {};
 
-      const opsGenial = g.opsGenial || 0;
-      const opsRico = r.opsRico || 0;
+        const genial = Number(g.genial || 0);
+        const rico = Number(r.rico || 0);
+        const opsGenial = Number(g.opsGenial || 0);
+        const opsRico = Number(r.opsRico || 0);
 
-      const [day, month, year] = date.split("/");
+        const [year, month, day] = dateKey.split("-");
 
-      const docId = `${year}-${month}-${day}`;
+        await setDoc(
+          doc(db, "trades", dateKey),
+          {
+            dateKey,
+            shortDate: `${day}/${month}/${year}`,
+            ano: year,
+            mes: month,
+            dia: day,
+            monthKey: `${year}-${month}`,
+            genial: Number(genial.toFixed(2)),
+            rico: Number(rico.toFixed(2)),
+            opsGenial,
+            opsRico,
+            custo: Number(((opsGenial + opsRico) * CUSTO_POR_OP).toFixed(2)),
+            updatedAt: Date.now(),
+          },
+          { merge: true }
+        );
+      }
 
-      await setDoc(doc(db, "trades", docId), {
-        dateKey: docId,
-        shortDate: date,
-        ano: year,
-        mes: month,
-        dia: day,
-        monthKey: `${year}-${month}`,
-
-        genial: Number(genial.toFixed(2)),
-        rico: Number(rico.toFixed(2)),
-
-        opsGenial,
-        opsRico,
-
-        custo: (opsGenial + opsRico) * CUSTO_POR_OP,
-
-        updatedAt: Date.now(),
-      });
+      setMsg("Salvo no Firebase 🚀");
+      await carregarDados();
+      alert("🚀 Dados atualizados com sucesso!");
+    } catch (error) {
+      console.error(error);
+      setMsg("Erro ao atualizar CSV.");
+      alert("Erro ao atualizar CSV.");
     }
-
-    alert("🚀 Dados atualizados com sucesso!");
   };
 
+  const calculado = useMemo(() => {
+    const rows = docsMes.map((item) => {
+      const genial = Number(item.genial || 0);
+      const rico = Number(item.rico || 0);
+      const opsGenial = Number(item.opsGenial || 0);
+      const opsRico = Number(item.opsRico || 0);
+
+      const genialLiquido = genial - opsGenial * CUSTO_POR_OP;
+      const ricoLiquido = rico - opsRico * CUSTO_POR_OP;
+      const totalLiquido = genialLiquido + ricoLiquido;
+      const opsTotal = opsGenial + opsRico;
+      const custoTotal = opsTotal * CUSTO_POR_OP;
+
+      return {
+        ...item,
+        genialLiquido,
+        ricoLiquido,
+        totalLiquido,
+        opsTotal,
+        custoTotal,
+      };
+    });
+
+    const totalMes = rows.reduce((a, b) => a + b.totalLiquido, 0);
+    const genialMes = rows.reduce((a, b) => a + b.genialLiquido, 0);
+    const ricoMes = rows.reduce((a, b) => a + b.ricoLiquido, 0);
+    const opsGenial = rows.reduce((a, b) => a + Number(b.opsGenial || 0), 0);
+    const opsRico = rows.reduce((a, b) => a + Number(b.opsRico || 0), 0);
+    const opsTotal = rows.reduce((a, b) => a + b.opsTotal, 0);
+    const custoTotalMes = rows.reduce((a, b) => a + b.custoTotal, 0);
+
+    const faltaMes = metaMensal - totalMes;
+    const diasRestantes = businessDaysRemaining(mes);
+    const valorPorDia = faltaMes > 0 && diasRestantes > 0 ? faltaMes / diasRestantes : 0;
+    const progresso = metaMensal > 0 ? (totalMes / metaMensal) * 100 : 0;
+
+    let status = "BEHIND";
+    let statusColor = "#ff4d4f";
+    if (progresso >= 100) {
+      status = "TARGET ACHIEVED";
+      statusColor = "#00ff88";
+    } else if (progresso >= 70) {
+      status = "ON TRACK";
+      statusColor = "#ffd700";
+    }
+
+    return {
+      rows,
+      totalMes,
+      genialMes,
+      ricoMes,
+      opsGenial,
+      opsRico,
+      opsTotal,
+      custoTotalMes,
+      faltaMes,
+      diasRestantes,
+      valorPorDia,
+      progresso,
+      status,
+      statusColor,
+    };
+  }, [docsMes, mes, metaMensal]);
+
   return (
-    <div style={{ padding: 20, background: "#020617", minHeight: "100vh", color: "white" }}>
-      <h1 style={{ color: "#00ffd5" }}>DASHBOARD EC</h1>
+    <div
+      style={{
+        background: "radial-gradient(circle at top, #071325 0%, #020617 45%, #01040d 100%)",
+        minHeight: "100vh",
+        color: "white",
+        padding: "28px 20px 40px",
+        fontFamily: "Arial, sans-serif",
+      }}
+    >
+      <div style={{ maxWidth: 1280, margin: "0 auto", textAlign: "center" }}>
+        <h1
+          style={{
+            color: "#00ffd5",
+            fontSize: 32,
+            marginBottom: 18,
+            fontWeight: 800,
+            letterSpacing: 1,
+            textShadow: "0 0 18px rgba(0,255,213,0.15)",
+          }}
+        >
+          DASHBOARD EC
+        </h1>
 
-      <br />
+        <div
+          style={{
+            display: "flex",
+            gap: 12,
+            justifyContent: "center",
+            alignItems: "center",
+            flexWrap: "wrap",
+            marginBottom: 18,
+          }}
+        >
+          <input type="file" accept=".csv" onChange={(e) => setGenialFile(e.target.files?.[0] || null)} style={{ color: "white" }} />
+          <input type="file" accept=".csv" onChange={(e) => setRicoFile(e.target.files?.[0] || null)} style={{ color: "white" }} />
 
-      <div>
-        <input type="file" onChange={(e) => setGenialFile(e.target.files[0])} />
-        <span> Genial</span>
+          <input
+            type="number"
+            value={metaMensal}
+            onChange={(e) => setMetaMensal(Number(e.target.value) || 0)}
+            style={{ padding: 8, borderRadius: 8, border: "none", width: 120 }}
+          />
+
+          <input
+            value={mes}
+            onChange={(e) => setMes(e.target.value)}
+            style={{ padding: 8, borderRadius: 8, border: "none", width: 120 }}
+            placeholder="2026-04"
+          />
+
+          <button
+            onClick={limparMes}
+            style={{
+              background: "#ff3b3b",
+              color: "#fff",
+              padding: "10px 18px",
+              border: "none",
+              borderRadius: 10,
+              cursor: "pointer",
+              fontWeight: 800,
+            }}
+          >
+            Limpar mês
+          </button>
+
+          <button
+            onClick={uploadData}
+            style={{
+              background: "#00ff9f",
+              color: "#000",
+              padding: "10px 18px",
+              border: "none",
+              borderRadius: 10,
+              cursor: "pointer",
+              fontWeight: 800,
+            }}
+          >
+            Atualizar CSV
+          </button>
+        </div>
+
+        <div
+          style={{
+            border: `2px solid ${calculado.statusColor}`,
+            marginTop: 10,
+            marginBottom: 20,
+            padding: 12,
+            textAlign: "center",
+            borderRadius: 12,
+            color: calculado.statusColor,
+            fontWeight: 800,
+            fontSize: 24,
+          }}
+        >
+          {calculado.status}
+        </div>
+
+        {!!msg ? <div style={{ marginBottom: 20, color: "#cbd5e1", fontSize: 15 }}>{msg}</div> : null}
+
+        <h2 style={{ marginTop: 10, color: "#fff", marginBottom: 20 }}>
+          TOTAL DO MÊS: {money(calculado.totalMes)}
+        </h2>
+
+        <div
+          style={{
+            marginTop: 25,
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+            gap: 14,
+          }}
+        >
+          <Panel title="TOTAL DO MÊS" value={money(calculado.totalMes)} color="#00ffd5" />
+          <Panel title="GENIAL" value={money(calculado.genialMes)} color="#60a5fa" />
+          <Panel title="RICO" value={money(calculado.ricoMes)} color="#fbbf24" />
+          <Panel title="META MENSAL" value={money(metaMensal)} color="#22c55e" />
+          <Panel title="FALTA MÊS" value={money(calculado.faltaMes)} color={calculado.faltaMes <= 0 ? "#00ff88" : "#ff4d4f"} />
+          <Panel title="OPS GENIAL" value={String(calculado.opsGenial)} color="#60a5fa" />
+          <Panel title="OPS RICO" value={String(calculado.opsRico)} color="#fbbf24" />
+          <Panel title="OPS NO MÊS" value={String(calculado.opsTotal)} color="#ffd84d" />
+          <Panel title="CUSTO / OP" value={money(CUSTO_POR_OP)} color="#e5e7eb" />
+          <Panel title="CUSTO TOTAL MÊS" value={money(calculado.custoTotalMes)} color="#ff4d4f" />
+          <Panel
+            title="VALOR POR DIA"
+            value={money(calculado.valorPorDia)}
+            color="#38bdf8"
+            sub={calculado.diasRestantes > 0 ? `${calculado.diasRestantes} dias úteis restantes` : "somente para mês atual"}
+          />
+          <Panel title="DIAS NO MÊS" value={String(calculado.rows.length)} color="#e5e7eb" />
+        </div>
       </div>
-
-      <br />
-
-      <div>
-        <input type="file" onChange={(e) => setRicoFile(e.target.files[0])} />
-        <span> Rico</span>
-      </div>
-
-      <br />
-
-      <div>
-        <label>Mês: </label>
-        <input
-          value={mes}
-          onChange={(e) => setMes(e.target.value)}
-          placeholder="2026-04"
-        />
-      </div>
-
-      <br />
-
-      <button
-        onClick={limparMes}
-        style={{
-          background: "#ff3b3b",
-          color: "#fff",
-          padding: "10px 20px",
-          marginRight: 10,
-          border: "none",
-          borderRadius: 8,
-          cursor: "pointer",
-        }}
-      >
-        Limpar mês
-      </button>
-
-      <button
-        onClick={uploadData}
-        style={{
-          background: "#00ff9f",
-          color: "#000",
-          padding: "10px 20px",
-          border: "none",
-          borderRadius: 8,
-          cursor: "pointer",
-          fontWeight: "bold",
-        }}
-      >
-        Atualizar CSV
-      </button>
     </div>
   );
 }
