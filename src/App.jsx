@@ -10,6 +10,17 @@ import {
   setDoc,
   where,
 } from "firebase/firestore";
+import {
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid,
+  AreaChart,
+  Area,
+} from "recharts";
 
 const CUSTO_POR_OP = 2.9;
 
@@ -67,6 +78,12 @@ function businessDaysRemaining(monthKey) {
   return count;
 }
 
+function statusInfo(progress) {
+  if (progress >= 100) return { label: "TARGET ACHIEVED", color: "#00ff88" };
+  if (progress >= 70) return { label: "ON TRACK", color: "#ffd700" };
+  return { label: "BEHIND", color: "#ff4d4f" };
+}
+
 function Panel({ title, value, color = "#00ff88", sub }) {
   return (
     <div
@@ -94,6 +111,38 @@ function Panel({ title, value, color = "#00ff88", sub }) {
         {value}
       </div>
       {sub ? <div style={{ color: "#64748b", fontSize: 11, marginTop: 10 }}>{sub}</div> : null}
+    </div>
+  );
+}
+
+function ChartCard({ title, children, rightLabel }) {
+  return (
+    <div
+      style={{
+        background: "linear-gradient(180deg, rgba(15,23,42,0.96) 0%, rgba(6,13,26,0.96) 100%)",
+        border: "1px solid rgba(255,255,255,0.06)",
+        borderRadius: 18,
+        padding: 16,
+        boxShadow: "0 10px 28px rgba(0,0,0,0.24)",
+        minHeight: 360,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 12,
+          alignItems: "center",
+          marginBottom: 12,
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ fontWeight: 800, fontSize: 16 }}>{title}</div>
+        {rightLabel ? (
+          <div style={{ color: "#94a3b8", fontSize: 13, fontWeight: 700 }}>{rightLabel}</div>
+        ) : null}
+      </div>
+      <div style={{ width: "100%", height: 280 }}>{children}</div>
     </div>
   );
 }
@@ -321,6 +370,40 @@ export default function App() {
       statusColor = "#ffd700";
     }
 
+    let acumulado = 0;
+    let pico = 0;
+    let drawdownMax = 0;
+
+    const curvaCapital = rows.map((r) => {
+      acumulado += r.totalLiquido;
+      if (acumulado > pico) pico = acumulado;
+
+      const drawdownAtual = pico - acumulado;
+      if (drawdownAtual > drawdownMax) drawdownMax = drawdownAtual;
+
+      return {
+        data: r.shortDate,
+        valor: Number(acumulado.toFixed(2)),
+      };
+    });
+
+    acumulado = 0;
+    pico = 0;
+
+    const curvaDrawdown = rows.map((r) => {
+      acumulado += r.totalLiquido;
+      if (acumulado > pico) pico = acumulado;
+      const drawdownAtual = pico - acumulado;
+
+      return {
+        data: r.shortDate,
+        valor: Number(drawdownAtual.toFixed(2)),
+      };
+    });
+
+    const mediaDia = rows.length ? totalMes / rows.length : 0;
+    const mediaOp = opsTotal ? totalMes / opsTotal : 0;
+
     return {
       rows,
       totalMes,
@@ -336,6 +419,11 @@ export default function App() {
       progresso,
       status,
       statusColor,
+      curvaCapital,
+      curvaDrawdown,
+      drawdownMax,
+      mediaDia,
+      mediaOp,
     };
   }, [docsMes, mes, metaMensal]);
 
@@ -353,7 +441,7 @@ export default function App() {
         <h1
           style={{
             color: "#00ffd5",
-            fontSize: 32,
+            fontSize: 30,
             marginBottom: 18,
             fontWeight: 800,
             letterSpacing: 1,
@@ -486,6 +574,76 @@ export default function App() {
             }
           />
           <Panel title="DIAS NO MÊS" value={String(calculado.rows.length)} color="#e5e7eb" />
+          <Panel title="DRAWDOWN MÁXIMO" value={money(calculado.drawdownMax)} color="#ff4d4f" />
+          <Panel title="MÉDIA POR DIA" value={money(calculado.mediaDia)} color="#38bdf8" />
+          <Panel title="MÉDIA POR OP" value={money(calculado.mediaOp)} color="#c084fc" />
+        </div>
+
+        <div
+          style={{
+            marginTop: 24,
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(420px, 1fr))",
+            gap: 16,
+          }}
+        >
+          <ChartCard
+            title="Curva de Capital"
+            rightLabel={`Final: ${money(calculado.totalMes)}`}
+          >
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={calculado.curvaCapital}>
+                <CartesianGrid stroke="#1e293b" />
+                <XAxis dataKey="data" stroke="#94a3b8" />
+                <YAxis stroke="#94a3b8" />
+                <Tooltip
+                  formatter={(value) => money(value)}
+                  contentStyle={{
+                    background: "#020617",
+                    border: "1px solid #1e293b",
+                    borderRadius: 10,
+                    color: "#fff",
+                  }}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="valor"
+                  stroke="#00ffd5"
+                  strokeWidth={3}
+                  dot={false}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </ChartCard>
+
+          <ChartCard
+            title="Curva de Drawdown"
+            rightLabel={`Máx: ${money(calculado.drawdownMax)}`}
+          >
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={calculado.curvaDrawdown}>
+                <CartesianGrid stroke="#1e293b" />
+                <XAxis dataKey="data" stroke="#94a3b8" />
+                <YAxis stroke="#94a3b8" />
+                <Tooltip
+                  formatter={(value) => money(value)}
+                  contentStyle={{
+                    background: "#020617",
+                    border: "1px solid #1e293b",
+                    borderRadius: 10,
+                    color: "#fff",
+                  }}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="valor"
+                  stroke="#ff4d4f"
+                  fill="#ff4d4f55"
+                  strokeWidth={3}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </ChartCard>
         </div>
       </div>
     </div>
