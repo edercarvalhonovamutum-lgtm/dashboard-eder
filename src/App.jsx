@@ -211,7 +211,7 @@ export default function App() {
     } catch (error) {
       console.error(error);
       setMsg("Erro ao limpar mês.");
-      alert("Erro ao limpar mês.");
+      alert(`Erro ao limpar mês: ${error.message || error}`);
     }
   };
 
@@ -240,24 +240,28 @@ export default function App() {
             }
 
             if (headerIndex === -1) {
-              reject(new Error(`Cabeçalho do CSV de ${broker} não encontrado.`));
+              reject(
+                new Error(
+                  `Cabeçalho do CSV de ${broker} não encontrado. Primeiras linhas: ${JSON.stringify(
+                    rows.slice(0, 5)
+                  )}`
+                )
+              );
               return;
             }
 
-            const idxFechamento = findColumnIndex(
-              header,
-              (h) => h.includes("fechamento")
-            );
-
+            const idxFechamento = findColumnIndex(header, (h) => h.includes("fechamento"));
             const idxResOperacao = findColumnIndex(
               header,
-              (h) => h.includes("res operacao")
+              (h) => h.includes("res") && h.includes("oper")
             );
 
             if (idxFechamento === -1 || idxResOperacao === -1) {
               reject(
                 new Error(
-                  `Colunas necessárias não encontradas no CSV de ${broker}.`
+                  `Colunas necessárias não encontradas no CSV de ${broker}. Cabeçalho encontrado: ${JSON.stringify(
+                    header
+                  )}`
                 )
               );
               return;
@@ -370,8 +374,9 @@ export default function App() {
       alert("🚀 Dados atualizados com sucesso!");
     } catch (error) {
       console.error(error);
-      setMsg("Erro ao atualizar CSV");
-      alert("Erro ao atualizar CSV");
+      const detail = error?.message || String(error);
+      setMsg(`Erro ao atualizar CSV: ${detail}`);
+      alert(`Erro ao atualizar CSV:\n\n${detail}`);
     }
   };
 
@@ -580,7 +585,17 @@ export default function App() {
         </div>
 
         {!!msg ? (
-          <div style={{ marginBottom: 20, color: "#cbd5e1", fontSize: 15 }}>
+          <div
+            style={{
+              marginBottom: 20,
+              color: "#cbd5e1",
+              fontSize: 14,
+              maxWidth: 1000,
+              marginInline: "auto",
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+            }}
+          >
             {msg}
           </div>
         ) : null}
