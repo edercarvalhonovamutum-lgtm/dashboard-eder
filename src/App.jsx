@@ -78,12 +78,6 @@ function businessDaysRemaining(monthKey) {
   return count;
 }
 
-function statusInfo(progress) {
-  if (progress >= 100) return { label: "TARGET ACHIEVED", color: "#00ff88" };
-  if (progress >= 70) return { label: "ON TRACK", color: "#ffd700" };
-  return { label: "BEHIND", color: "#ff4d4f" };
-}
-
 function Panel({ title, value, color = "#00ff88", sub }) {
   return (
     <div
@@ -147,6 +141,12 @@ function ChartCard({ title, children, rightLabel }) {
   );
 }
 
+function statusInfo(progress) {
+  if (progress >= 100) return { label: "TARGET ACHIEVED", color: "#00ff88" };
+  if (progress >= 70) return { label: "ON TRACK", color: "#ffd700" };
+  return { label: "BEHIND", color: "#ff4d4f" };
+}
+
 export default function App() {
   const [genialFile, setGenialFile] = useState(null);
   const [ricoFile, setRicoFile] = useState(null);
@@ -206,17 +206,27 @@ export default function App() {
           try {
             const rows = results.data || [];
             let headerIndex = -1;
+            let header = [];
 
             for (let i = 0; i < rows.length; i++) {
               const row = rows[i].map((c) => String(c || "").trim());
               if (row[0] === "Ativo" && row[1] === "Abertura") {
                 headerIndex = i;
+                header = row;
                 break;
               }
             }
 
             if (headerIndex === -1) {
               reject(new Error(`Cabeçalho do CSV de ${broker} não encontrado.`));
+              return;
+            }
+
+            const idxFechamento = header.indexOf("Fechamento");
+            const idxResOperacao = header.indexOf("Res. Operação");
+
+            if (idxFechamento === -1 || idxResOperacao === -1) {
+              reject(new Error(`Colunas necessárias não encontradas no CSV de ${broker}.`));
               return;
             }
 
@@ -227,16 +237,16 @@ export default function App() {
               const row = rawRow.map((c) => String(c || "").trim());
               if (!row.length) return;
 
-              const dataAbertura = row[1];
-              if (!dataAbertura || !String(dataAbertura).includes("/")) return;
+              const fechamento = row[idxFechamento];
+              const resOperacaoRaw = row[idxResOperacao];
 
-              const totalRaw = row[row.length - 2];
-              if (totalRaw === "" || totalRaw === undefined || totalRaw === null) return;
+              if (!fechamento || !String(fechamento).includes("/")) return;
+              if (resOperacaoRaw === "" || resOperacaoRaw === undefined || resOperacaoRaw === null) return;
 
-              const dateInfo = normalizeDate(dataAbertura);
+              const dateInfo = normalizeDate(fechamento);
               if (!dateInfo) return;
 
-              const total = toNumberBR(totalRaw);
+              const resultado = toNumberBR(resOperacaoRaw);
 
               if (!grouped[dateInfo.dateKey]) {
                 grouped[dateInfo.dateKey] = {
@@ -251,10 +261,10 @@ export default function App() {
               }
 
               if (broker === "genial") {
-                grouped[dateInfo.dateKey].genial += total;
+                grouped[dateInfo.dateKey].genial += resultado;
                 grouped[dateInfo.dateKey].opsGenial += 1;
               } else {
-                grouped[dateInfo.dateKey].rico += total;
+                grouped[dateInfo.dateKey].rico += resultado;
                 grouped[dateInfo.dateKey].opsRico += 1;
               }
             });
@@ -360,15 +370,7 @@ export default function App() {
     const valorPorDia = faltaMes > 0 && diasRestantes > 0 ? faltaMes / diasRestantes : 0;
     const progresso = metaMensal > 0 ? (totalMes / metaMensal) * 100 : 0;
 
-    let status = "BEHIND";
-    let statusColor = "#ff4d4f";
-    if (progresso >= 100) {
-      status = "TARGET ACHIEVED";
-      statusColor = "#00ff88";
-    } else if (progresso >= 70) {
-      status = "ON TRACK";
-      statusColor = "#ffd700";
-    }
+    const { label: status, color: statusColor } = statusInfo(progresso);
 
     let acumulado = 0;
     let pico = 0;
