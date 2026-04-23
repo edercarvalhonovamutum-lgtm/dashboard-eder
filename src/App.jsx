@@ -1,14 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import Papa from "papaparse";
 import { db } from "./firebase";
-import {
-  collection,
-  doc,
-  getDocs,
-  getDoc,
-  onSnapshot,
-  setDoc,
-} from "firebase/firestore";
+import { collection, doc, getDoc, onSnapshot, setDoc } from "firebase/firestore";
 
 function money(v) {
   return `R$ ${Number(v || 0).toFixed(2)}`;
@@ -18,6 +11,7 @@ function toNumberBR(value) {
   if (value === null || value === undefined) return 0;
   const txt = String(value).trim();
   if (!txt) return 0;
+
   const cleaned = txt.replace(/\./g, "").replace(",", ".");
   const n = parseFloat(cleaned);
   return Number.isFinite(n) ? n : 0;
@@ -34,6 +28,9 @@ function normalizeDate(raw) {
   const yyyy = String(parts[2]);
 
   return {
+    dd,
+    mm,
+    yyyy,
     dateKey: `${yyyy}-${mm}-${dd}`,
     shortDate: `${dd}/${mm}/${yyyy}`,
     monthKey: `${yyyy}-${mm}`,
@@ -61,6 +58,7 @@ function businessDaysRemaining(monthKey) {
   const [y, m] = monthKey.split("-").map(Number);
   const now = new Date();
   const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+
   if (monthKey !== currentMonthKey) return 0;
 
   const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -78,54 +76,6 @@ function statusInfo(progress) {
   if (progress >= 100) return { label: "TARGET ACHIEVED", color: "#00ff88" };
   if (progress >= 70) return { label: "ON TRACK", color: "#ffd700" };
   return { label: "BEHIND", color: "#ff4d4f" };
-}
-
-function pickValueFromRow(row) {
-  const possibleDateKeys = [
-    "Data",
-    "data",
-    "Date",
-    "DATE",
-    "Dt. Fechamento",
-    "Fechamento",
-    "Dia",
-  ];
-
-  const possibleValueKeys = [
-    "Resultado",
-    "resultado",
-    "Lucro",
-    "lucro",
-    "P&L",
-    "P/L",
-    "Valor",
-    "valor",
-    "Total",
-    "total",
-    "Resultado Líquido",
-    "Resultado Liquido",
-    "Res. Líquido",
-    "Res. Liquido",
-  ];
-
-  let rawDate = "";
-  let rawValue = "";
-
-  for (const key of possibleDateKeys) {
-    if (row[key] !== undefined && row[key] !== null && String(row[key]).trim() !== "") {
-      rawDate = row[key];
-      break;
-    }
-  }
-
-  for (const key of possibleValueKeys) {
-    if (row[key] !== undefined && row[key] !== null && String(row[key]).trim() !== "") {
-      rawValue = row[key];
-      break;
-    }
-  }
-
-  return { rawDate, rawValue };
 }
 
 function chartPath(values, width = 900, height = 240, pad = 24) {
@@ -290,6 +240,62 @@ function LineChart({ title, values, labels, color, accent }) {
   );
 }
 
+function parseProfitCsvByColumns(text) {
+  const parsed = Papa.parse(text, {
+    header: false,
+    skipEmptyLines: true,
+  });
+
+  const rows = parsed.data || [];
+  if (!rows.length) return [];
+
+  let headerIndex = -1;
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i].map((c) => String(c || "").trim());
+    if (row[0] === "Ativo" && row[1] === "Abertura" && row[row.length - 1] === "Total") {
+      headerIndex = i;
+      break;
+    }
+  }
+
+  if (headerIndex === -1) return [];
+
+  const dataRows = rows.slice(headerIndex + 1);
+  const grouped = {};
+
+  for (const rawRow of dataRows) {
+    const row = rawRow.map((c) => String(c || "").trim());
+    if (!row.length) continue;
+
+    const ativo = row[0];
+    const dataAbertura = row[1];
+    const totalRaw = row[row.length - 1];
+
+    if (!ativo || !dataAbertura || !totalRaw) continue;
+
+    const dateInfo = normalizeDate(dataAbertura);
+    if (!dateInfo) continue;
+
+    const total = toNumberBR(totalRaw);
+
+    if (!grouped[dateInfo.dateKey]) {
+      grouped[dateInfo.dateKey] = {
+        dateKey: dateInfo.dateKey,
+        shortDate: dateInfo.shortDate,
+        monthKey: dateInfo.monthKey,
+        total: 0,
+        ops: 0,
+      };
+    }
+
+    grouped[dateInfo.dateKey].total += total;
+    grouped[dateInfo.dateKey].ops += 1;
+  }
+
+  return Object.values(grouped);
+}
+
 export default function App() {
   const [docs, setDocs] = useState([]);
   const [genialFile, setGenialFile] = useState(null);
@@ -323,50 +329,10 @@ export default function App() {
   async function saveBrokerFile(file, brokerName) {
     if (!file) return;
 
-    const parsed = await new Promise((resolve) => {
-      Papa.parse(file, {
-        header: true,
-        skipEmptyLines: true,
-        complete: (result) => resolve(result.data || []),
-      });
-    });
+    const text = await file.text();
+    const grouped = parseProfitCsvByColumns(text);
 
-    const grouped = {};
-
-    for (const row of parsed) {
-      try {
-        const { rawDate, rawValue } = pickValueFromRow(row);
-        const dateInfo = normalizeDate(rawDate);
-        if (!dateInfo) continue;
-
-        const value = toNumberBR(rawValue);
-        if (!grouped[dateInfo.dateKey]) {
-          grouped[dateInfo.dateKey] = {
-            dateKey: dateInfo.dateKey,
-            shortDate: dateInfo.shortDate,
-            monthKey: dateInfo.monthKey,
-            genial: 0,
-            rico: 0,
-            opsGenial: 0,
-            opsRico: 0,
-            updatedAt: Date.now(),
-          };
-        }
-
-        if (brokerName === "genial") {
-          grouped[dateInfo.dateKey].genial += value;
-          grouped[dateInfo.dateKey].opsGenial += 1;
-        } else {
-          grouped[dateInfo.dateKey].rico += value;
-          grouped[dateInfo.dateKey].opsRico += 1;
-        }
-      } catch {
-        // ignora linha ruim
-      }
-    }
-
-    const entries = Object.values(grouped);
-    for (const item of entries) {
+    for (const item of grouped) {
       const ref = doc(db, "trades", item.dateKey);
       const exists = await getDoc(ref);
       const current = exists.exists() ? exists.data() : {};
@@ -377,10 +343,10 @@ export default function App() {
           dateKey: item.dateKey,
           shortDate: item.shortDate,
           monthKey: item.monthKey,
-          genial: brokerName === "genial" ? item.genial : Number(current.genial || 0),
-          rico: brokerName === "rico" ? item.rico : Number(current.rico || 0),
-          opsGenial: brokerName === "genial" ? item.opsGenial : Number(current.opsGenial || 0),
-          opsRico: brokerName === "rico" ? item.opsRico : Number(current.opsRico || 0),
+          genial: brokerName === "genial" ? item.total : Number(current.genial || 0),
+          rico: brokerName === "rico" ? item.total : Number(current.rico || 0),
+          opsGenial: brokerName === "genial" ? item.ops : Number(current.opsGenial || 0),
+          opsRico: brokerName === "rico" ? item.ops : Number(current.opsRico || 0),
           updatedAt: Date.now(),
         },
         { merge: true }
