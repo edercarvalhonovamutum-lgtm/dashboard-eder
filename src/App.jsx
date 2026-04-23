@@ -1,7 +1,14 @@
 import React, { useEffect, useMemo, useState } from "react";
 import Papa from "papaparse";
 import { db } from "./firebase";
-import { collection, doc, getDoc, onSnapshot, setDoc } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  getDocs,
+  onSnapshot,
+  setDoc,
+  writeBatch,
+} from "firebase/firestore";
 
 function money(v) {
   return `R$ ${Number(v || 0).toFixed(2)}`;
@@ -272,7 +279,7 @@ function parseProfitCsvByColumns(text) {
     const dataAbertura = row[1];
     const totalRaw = row[row.length - 1];
 
-    if (!ativo || !dataAbertura || !totalRaw) continue;
+    if (!ativo || !dataAbertura || totalRaw === "") continue;
 
     const dateInfo = normalizeDate(dataAbertura);
     if (!dateInfo) continue;
@@ -326,16 +333,71 @@ export default function App() {
     }
   }, [docs, mesSelecionado]);
 
+  async function resetBrokerMonths(monthsToReset, brokerName) {
+    if (!monthsToReset.length) return;
+
+    const snap = await getDocs(collection(db, "trades"));
+    const allDocs = [];
+    snap.forEach((d) => allDocs.push({ id: d.id, ...d.data() }));
+
+    const targets = allDocs.filter((item) => monthsToReset.includes(item.monthKey));
+    if (!targets.length) return;
+
+    let batch = writeBatch(db);
+    let count = 0;
+
+    for (const item of targets) {
+      const ref = doc(db, "trades", item.dateKey);
+
+      if (brokerName === "genial") {
+        batch.set(
+          ref,
+          {
+            genial: 0,
+            opsGenial: 0,
+            updatedAt: Date.now(),
+          },
+          { merge: true }
+        );
+      } else {
+        batch.set(
+          ref,
+          {
+            rico: 0,
+            opsRico: 0,
+            updatedAt: Date.now(),
+          },
+          { merge: true }
+        );
+      }
+
+      count++;
+      if (count === 400) {
+        await batch.commit();
+        batch = writeBatch(db);
+        count = 0;
+      }
+    }
+
+    if (count > 0) {
+      await batch.commit();
+    }
+  }
+
   async function saveBrokerFile(file, brokerName) {
     if (!file) return;
 
     const text = await file.text();
     const grouped = parseProfitCsvByColumns(text);
+    if (!grouped.length) {
+      throw new Error(`Não foi possível ler o CSV de ${brokerName}.`);
+    }
+
+    const monthsInFile = [...new Set(grouped.map((i) => i.monthKey).filter(Boolean))];
+    await resetBrokerMonths(monthsInFile, brokerName);
 
     for (const item of grouped) {
       const ref = doc(db, "trades", item.dateKey);
-      const exists = await getDoc(ref);
-      const current = exists.exists() ? exists.data() : {};
 
       await setDoc(
         ref,
@@ -343,10 +405,10 @@ export default function App() {
           dateKey: item.dateKey,
           shortDate: item.shortDate,
           monthKey: item.monthKey,
-          genial: brokerName === "genial" ? item.total : Number(current.genial || 0),
-          rico: brokerName === "rico" ? item.total : Number(current.rico || 0),
-          opsGenial: brokerName === "genial" ? item.ops : Number(current.opsGenial || 0),
-          opsRico: brokerName === "rico" ? item.ops : Number(current.opsRico || 0),
+          genial: brokerName === "genial" ? item.total : undefined,
+          rico: brokerName === "rico" ? item.total : undefined,
+          opsGenial: brokerName === "genial" ? item.ops : undefined,
+          opsRico: brokerName === "rico" ? item.ops : undefined,
           updatedAt: Date.now(),
         },
         { merge: true }
