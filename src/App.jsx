@@ -78,6 +78,31 @@ function businessDaysRemaining(monthKey) {
   return count;
 }
 
+function statusInfo(progress) {
+  if (progress >= 100) return { label: "TARGET ACHIEVED", color: "#00ff88" };
+  if (progress >= 70) return { label: "ON TRACK", color: "#ffd700" };
+  return { label: "BEHIND", color: "#ff4d4f" };
+}
+
+function normalizeHeaderText(text) {
+  return String(text || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/�/g, "")
+    .replace(/[^\w\s.%]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function findColumnIndex(header, matcher) {
+  for (let i = 0; i < header.length; i++) {
+    const h = normalizeHeaderText(header[i]);
+    if (matcher(h)) return i;
+  }
+  return -1;
+}
+
 function Panel({ title, value, color = "#00ff88", sub }) {
   return (
     <div
@@ -139,12 +164,6 @@ function ChartCard({ title, children, rightLabel }) {
       <div style={{ width: "100%", height: 280 }}>{children}</div>
     </div>
   );
-}
-
-function statusInfo(progress) {
-  if (progress >= 100) return { label: "TARGET ACHIEVED", color: "#00ff88" };
-  if (progress >= 70) return { label: "ON TRACK", color: "#ffd700" };
-  return { label: "BEHIND", color: "#ff4d4f" };
 }
 
 export default function App() {
@@ -210,7 +229,10 @@ export default function App() {
 
             for (let i = 0; i < rows.length; i++) {
               const row = rows[i].map((c) => String(c || "").trim());
-              if (row[0] === "Ativo" && row[1] === "Abertura") {
+              const col0 = normalizeHeaderText(row[0]);
+              const col1 = normalizeHeaderText(row[1]);
+
+              if (col0 === "ativo" && col1 === "abertura") {
                 headerIndex = i;
                 header = row;
                 break;
@@ -222,11 +244,22 @@ export default function App() {
               return;
             }
 
-            const idxFechamento = header.indexOf("Fechamento");
-            const idxResOperacao = header.indexOf("Res. Operação");
+            const idxFechamento = findColumnIndex(
+              header,
+              (h) => h.includes("fechamento")
+            );
+
+            const idxResOperacao = findColumnIndex(
+              header,
+              (h) => h.includes("res operacao")
+            );
 
             if (idxFechamento === -1 || idxResOperacao === -1) {
-              reject(new Error(`Colunas necessárias não encontradas no CSV de ${broker}.`));
+              reject(
+                new Error(
+                  `Colunas necessárias não encontradas no CSV de ${broker}.`
+                )
+              );
               return;
             }
 
@@ -241,7 +274,12 @@ export default function App() {
               const resOperacaoRaw = row[idxResOperacao];
 
               if (!fechamento || !String(fechamento).includes("/")) return;
-              if (resOperacaoRaw === "" || resOperacaoRaw === undefined || resOperacaoRaw === null) return;
+              if (
+                resOperacaoRaw === "" ||
+                resOperacaoRaw === undefined ||
+                resOperacaoRaw === null
+              )
+                return;
 
               const dateInfo = normalizeDate(fechamento);
               if (!dateInfo) return;
@@ -291,7 +329,10 @@ export default function App() {
       const genialData = genialFile ? await processCSV(genialFile, "genial") : {};
       const ricoData = ricoFile ? await processCSV(ricoFile, "rico") : {};
 
-      const allDates = new Set([...Object.keys(genialData), ...Object.keys(ricoData)]);
+      const allDates = new Set([
+        ...Object.keys(genialData),
+        ...Object.keys(ricoData),
+      ]);
 
       for (const dateKey of allDates) {
         const g = genialData[dateKey] || {};
@@ -367,7 +408,8 @@ export default function App() {
 
     const faltaMes = metaMensal - totalMes;
     const diasRestantes = businessDaysRemaining(mes);
-    const valorPorDia = faltaMes > 0 && diasRestantes > 0 ? faltaMes / diasRestantes : 0;
+    const valorPorDia =
+      faltaMes > 0 && diasRestantes > 0 ? faltaMes / diasRestantes : 0;
     const progresso = metaMensal > 0 ? (totalMes / metaMensal) * 100 : 0;
 
     const { label: status, color: statusColor } = statusInfo(progresso);
@@ -395,11 +437,10 @@ export default function App() {
     const curvaDrawdown = rows.map((r) => {
       acumulado += r.totalLiquido;
       if (acumulado > pico) pico = acumulado;
-      const drawdownAtual = pico - acumulado;
 
       return {
         data: r.shortDate,
-        valor: Number(drawdownAtual.toFixed(2)),
+        valor: Number((pico - acumulado).toFixed(2)),
       };
     });
 
@@ -432,7 +473,8 @@ export default function App() {
   return (
     <div
       style={{
-        background: "radial-gradient(circle at top, #071325 0%, #020617 45%, #01040d 100%)",
+        background:
+          "radial-gradient(circle at top, #071325 0%, #020617 45%, #01040d 100%)",
         minHeight: "100vh",
         color: "white",
         padding: "28px 20px 40px",
@@ -537,7 +579,11 @@ export default function App() {
           {calculado.status}
         </div>
 
-        {!!msg ? <div style={{ marginBottom: 20, color: "#cbd5e1", fontSize: 15 }}>{msg}</div> : null}
+        {!!msg ? (
+          <div style={{ marginBottom: 20, color: "#cbd5e1", fontSize: 15 }}>
+            {msg}
+          </div>
+        ) : null}
 
         <h2 style={{ marginTop: 10, color: "#fff", marginBottom: 20 }}>
           TOTAL DO MÊS: {money(calculado.totalMes)}
