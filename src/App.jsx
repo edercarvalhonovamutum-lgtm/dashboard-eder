@@ -23,6 +23,7 @@ import {
 } from "recharts";
 
 const CUSTO_POR_OP = 2.9;
+const META_ANUAL_FIXA = 120000;
 
 function money(v) {
   return `R$ ${Number(v || 0).toFixed(2)}`;
@@ -55,6 +56,7 @@ function normalizeDate(raw) {
     dateKey: `${yyyy}-${mm}-${dd}`,
     shortDate: `${dd}/${mm}/${yyyy}`,
     monthKey: `${yyyy}-${mm}`,
+    yearKey: `${yyyy}`,
   };
 }
 
@@ -173,17 +175,31 @@ export default function App() {
   const [metaMensal, setMetaMensal] = useState(10000);
   const [msg, setMsg] = useState("");
   const [docsMes, setDocsMes] = useState([]);
+  const [docsAno, setDocsAno] = useState([]);
+  const [dataFiltro, setDataFiltro] = useState("");
+
+  const anoSelecionado = mes.split("-")[0] || "2026";
 
   const carregarDados = async () => {
     try {
-      const q = query(collection(db, "trades"), where("monthKey", "==", mes));
-      const snapshot = await getDocs(q);
+      const qMes = query(collection(db, "trades"), where("monthKey", "==", mes));
+      const snapshotMes = await getDocs(qMes);
 
-      const rows = [];
-      snapshot.forEach((d) => rows.push(d.data()));
-      rows.sort((a, b) => String(a.dateKey || "").localeCompare(String(b.dateKey || "")));
+      const rowsMes = [];
+      snapshotMes.forEach((d) => rowsMes.push(d.data()));
+      rowsMes.sort((a, b) => String(a.dateKey || "").localeCompare(String(b.dateKey || "")));
+      setDocsMes(rowsMes);
 
-      setDocsMes(rows);
+      const snapshotAno = await getDocs(collection(db, "trades"));
+      const rowsAno = [];
+      snapshotAno.forEach((d) => {
+        const item = d.data();
+        if (String(item.ano || "") === String(anoSelecionado)) {
+          rowsAno.push(item);
+        }
+      });
+      rowsAno.sort((a, b) => String(a.dateKey || "").localeCompare(String(b.dateKey || "")));
+      setDocsAno(rowsAno);
     } catch (error) {
       console.error(error);
       setMsg("Erro ao carregar dados do Firebase.");
@@ -295,6 +311,7 @@ export default function App() {
                   dateKey: dateInfo.dateKey,
                   shortDate: dateInfo.shortDate,
                   monthKey: dateInfo.monthKey,
+                  ano: dateInfo.yearKey,
                   genial: 0,
                   rico: 0,
                   opsGenial: 0,
@@ -450,7 +467,6 @@ export default function App() {
     });
 
     const mediaDia = rows.length ? totalMes / rows.length : 0;
-    const mediaOp = opsTotal ? totalMes / opsTotal : 0;
 
     return {
       rows,
@@ -471,9 +487,72 @@ export default function App() {
       curvaDrawdown,
       drawdownMax,
       mediaDia,
-      mediaOp,
     };
   }, [docsMes, mes, metaMensal]);
+
+  const calculadoAno = useMemo(() => {
+    const rows = docsAno.map((item) => {
+      const genial = Number(item.genial || 0);
+      const rico = Number(item.rico || 0);
+      const opsGenial = Number(item.opsGenial || 0);
+      const opsRico = Number(item.opsRico || 0);
+
+      const genialLiquido = genial - opsGenial * CUSTO_POR_OP;
+      const ricoLiquido = rico - opsRico * CUSTO_POR_OP;
+      const totalLiquido = genialLiquido + ricoLiquido;
+
+      return {
+        ...item,
+        totalLiquido,
+      };
+    });
+
+    const totalAno = rows.reduce((a, b) => a + b.totalLiquido, 0);
+    const faltaAno = META_ANUAL_FIXA - totalAno;
+    const progressoAno = META_ANUAL_FIXA > 0 ? (totalAno / META_ANUAL_FIXA) * 100 : 0;
+
+    return {
+      totalAno,
+      faltaAno,
+      progressoAno,
+    };
+  }, [docsAno]);
+
+  const detalheDia = useMemo(() => {
+    if (!dataFiltro) {
+      return {
+        genial: 0,
+        rico: 0,
+        total: 0,
+        opsGenial: 0,
+        opsRico: 0,
+      };
+    }
+
+    const item = docsMes.find((d) => d.dateKey === dataFiltro);
+
+    if (!item) {
+      return {
+        genial: 0,
+        rico: 0,
+        total: 0,
+        opsGenial: 0,
+        opsRico: 0,
+      };
+    }
+
+    const genial = Number(item.genial || 0) - Number(item.opsGenial || 0) * CUSTO_POR_OP;
+    const rico = Number(item.rico || 0) - Number(item.opsRico || 0) * CUSTO_POR_OP;
+    const total = genial + rico;
+
+    return {
+      genial,
+      rico,
+      total,
+      opsGenial: Number(item.opsGenial || 0),
+      opsRico: Number(item.opsRico || 0),
+    };
+  }, [dataFiltro, docsMes]);
 
   return (
     <div
@@ -639,7 +718,117 @@ export default function App() {
           <Panel title="DIAS NO MÊS" value={String(calculado.rows.length)} color="#e5e7eb" />
           <Panel title="DRAWDOWN MÁXIMO" value={money(calculado.drawdownMax)} color="#ff4d4f" />
           <Panel title="MÉDIA POR DIA" value={money(calculado.mediaDia)} color="#38bdf8" />
-          <Panel title="MÉDIA POR OP" value={money(calculado.mediaOp)} color="#c084fc" />
+          <Panel title="META ANUAL" value={money(META_ANUAL_FIXA)} color="#22c55e" />
+          <Panel title="TOTAL ANUAL" value={money(calculadoAno.totalAno)} color="#00ffd5" />
+          <Panel
+            title="FALTA ANUAL"
+            value={money(calculadoAno.faltaAno)}
+            color={calculadoAno.faltaAno <= 0 ? "#00ff88" : "#ff4d4f"}
+          />
+        </div>
+
+        <div
+          style={{
+            marginTop: 24,
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+            gap: 14,
+          }}
+        >
+          <div
+            style={{
+              background: "linear-gradient(180deg, rgba(15,23,42,0.96) 0%, rgba(6,13,26,0.96) 100%)",
+              border: "1px solid rgba(255,255,255,0.06)",
+              borderRadius: 18,
+              padding: 16,
+              boxShadow: "0 10px 28px rgba(0,0,0,0.24)",
+            }}
+          >
+            <div style={{ fontWeight: 800, marginBottom: 12, fontSize: 16 }}>
+              Filtro por Dia
+            </div>
+
+            <input
+              type="date"
+              value={dataFiltro}
+              onChange={(e) => setDataFiltro(e.target.value)}
+              style={{
+                padding: 10,
+                borderRadius: 10,
+                border: "none",
+                width: "100%",
+                marginBottom: 14,
+              }}
+            />
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr",
+                gap: 10,
+                textAlign: "left",
+              }}
+            >
+              <div style={{ color: "#60a5fa", fontWeight: 700 }}>
+                Genial no dia: {money(detalheDia.genial)}
+              </div>
+              <div style={{ color: "#fbbf24", fontWeight: 700 }}>
+                Rico no dia: {money(detalheDia.rico)}
+              </div>
+              <div style={{ color: "#00ffd5", fontWeight: 800 }}>
+                Total do dia: {money(detalheDia.total)}
+              </div>
+              <div style={{ color: "#94a3b8", fontSize: 13 }}>
+                Ops Genial: {detalheDia.opsGenial}
+              </div>
+              <div style={{ color: "#94a3b8", fontSize: 13 }}>
+                Ops Rico: {detalheDia.opsRico}
+              </div>
+            </div>
+          </div>
+
+          <div
+            style={{
+              background: "linear-gradient(180deg, rgba(15,23,42,0.96) 0%, rgba(6,13,26,0.96) 100%)",
+              border: "1px solid rgba(255,255,255,0.06)",
+              borderRadius: 18,
+              padding: 16,
+              boxShadow: "0 10px 28px rgba(0,0,0,0.24)",
+            }}
+          >
+            <div style={{ fontWeight: 800, marginBottom: 12, fontSize: 16 }}>
+              Progresso Anual
+            </div>
+
+            <div
+              style={{
+                width: "100%",
+                height: 18,
+                background: "#0f172a",
+                borderRadius: 999,
+                overflow: "hidden",
+                border: "1px solid rgba(255,255,255,0.06)",
+              }}
+            >
+              <div
+                style={{
+                  width: `${Math.max(0, Math.min(100, calculadoAno.progressoAno))}%`,
+                  height: "100%",
+                  background: "linear-gradient(90deg, #00ffd5 0%, #00ff88 100%)",
+                }}
+              />
+            </div>
+
+            <div
+              style={{
+                marginTop: 12,
+                color: "#cbd5e1",
+                fontWeight: 700,
+              }}
+            >
+              {calculadoAno.progressoAno.toFixed(1)}% da meta anual
+            </div>
+          </div>
         </div>
 
         <div
