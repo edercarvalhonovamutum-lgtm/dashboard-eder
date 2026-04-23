@@ -21,6 +21,7 @@ function toNumberBR(value) {
   if (value === null || value === undefined) return 0;
   const txt = String(value).trim();
   if (!txt) return 0;
+
   const cleaned = txt.replace(/\./g, "").replace(",", ".");
   const n = parseFloat(cleaned);
   return Number.isFinite(n) ? n : 0;
@@ -103,7 +104,6 @@ export default function App() {
   const [mes, setMes] = useState("2026-04");
   const [metaMensal, setMetaMensal] = useState(10000);
   const [msg, setMsg] = useState("");
-
   const [docsMes, setDocsMes] = useState([]);
 
   const carregarDados = async () => {
@@ -112,11 +112,9 @@ export default function App() {
       const snapshot = await getDocs(q);
 
       const rows = [];
-      snapshot.forEach((d) => {
-        rows.push(d.data());
-      });
-
+      snapshot.forEach((d) => rows.push(d.data()));
       rows.sort((a, b) => String(a.dateKey || "").localeCompare(String(b.dateKey || "")));
+
       setDocsMes(rows);
     } catch (error) {
       console.error(error);
@@ -154,6 +152,7 @@ export default function App() {
       Papa.parse(file, {
         header: false,
         skipEmptyLines: true,
+        delimiter: ";",
         complete: (results) => {
           try {
             const rows = results.data || [];
@@ -161,7 +160,7 @@ export default function App() {
 
             for (let i = 0; i < rows.length; i++) {
               const row = rows[i].map((c) => String(c || "").trim());
-              if (row[0] === "Ativo" && row[1] === "Abertura" && row[row.length - 1] === "Total") {
+              if (row[0] === "Ativo" && row[1] === "Abertura") {
                 headerIndex = i;
                 break;
               }
@@ -180,9 +179,10 @@ export default function App() {
               if (!row.length) return;
 
               const dataAbertura = row[1];
-              const totalRaw = row[row.length - 1];
+              if (!dataAbertura || !String(dataAbertura).includes("/")) return;
 
-              if (!dataAbertura || totalRaw === "") return;
+              const totalRaw = row[row.length - 2];
+              if (totalRaw === "" || totalRaw === undefined || totalRaw === null) return;
 
               const dateInfo = normalizeDate(dataAbertura);
               if (!dateInfo) return;
@@ -270,8 +270,8 @@ export default function App() {
       alert("🚀 Dados atualizados com sucesso!");
     } catch (error) {
       console.error(error);
-      setMsg("Erro ao atualizar CSV.");
-      alert("Erro ao atualizar CSV.");
+      setMsg("Erro ao atualizar CSV");
+      alert("Erro ao atualizar CSV");
     }
   };
 
@@ -373,8 +373,18 @@ export default function App() {
             marginBottom: 18,
           }}
         >
-          <input type="file" accept=".csv" onChange={(e) => setGenialFile(e.target.files?.[0] || null)} style={{ color: "white" }} />
-          <input type="file" accept=".csv" onChange={(e) => setRicoFile(e.target.files?.[0] || null)} style={{ color: "white" }} />
+          <input
+            type="file"
+            accept=".csv"
+            onChange={(e) => setGenialFile(e.target.files?.[0] || null)}
+            style={{ color: "white" }}
+          />
+          <input
+            type="file"
+            accept=".csv"
+            onChange={(e) => setRicoFile(e.target.files?.[0] || null)}
+            style={{ color: "white" }}
+          />
 
           <input
             type="number"
@@ -455,7 +465,11 @@ export default function App() {
           <Panel title="GENIAL" value={money(calculado.genialMes)} color="#60a5fa" />
           <Panel title="RICO" value={money(calculado.ricoMes)} color="#fbbf24" />
           <Panel title="META MENSAL" value={money(metaMensal)} color="#22c55e" />
-          <Panel title="FALTA MÊS" value={money(calculado.faltaMes)} color={calculado.faltaMes <= 0 ? "#00ff88" : "#ff4d4f"} />
+          <Panel
+            title="FALTA MÊS"
+            value={money(calculado.faltaMes)}
+            color={calculado.faltaMes <= 0 ? "#00ff88" : "#ff4d4f"}
+          />
           <Panel title="OPS GENIAL" value={String(calculado.opsGenial)} color="#60a5fa" />
           <Panel title="OPS RICO" value={String(calculado.opsRico)} color="#fbbf24" />
           <Panel title="OPS NO MÊS" value={String(calculado.opsTotal)} color="#ffd84d" />
@@ -465,7 +479,11 @@ export default function App() {
             title="VALOR POR DIA"
             value={money(calculado.valorPorDia)}
             color="#38bdf8"
-            sub={calculado.diasRestantes > 0 ? `${calculado.diasRestantes} dias úteis restantes` : "somente para mês atual"}
+            sub={
+              calculado.diasRestantes > 0
+                ? `${calculado.diasRestantes} dias úteis restantes`
+                : "somente para mês atual"
+            }
           />
           <Panel title="DIAS NO MÊS" value={String(calculado.rows.length)} color="#e5e7eb" />
         </div>
